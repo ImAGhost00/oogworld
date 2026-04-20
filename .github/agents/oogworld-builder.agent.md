@@ -1,7 +1,7 @@
 ---
 description: "Use when building Oog-World tortoise terrarium dashboard features: FastAPI backend, Tailwind SPA, HLS.js live stream, ntfy notifications, GhostWorld dark UI, Docker deployment."
 name: "OogWorld Builder"
-version: "0.0.0"
+version: "0.0.1"
 tools: [read, edit, search, execute, todo]
 user-invocable: true
 ---
@@ -61,6 +61,10 @@ Your job is to build and maintain a high-performance, mobile-responsive web app 
 - Each numeric segment must be an integer from `0` to `99`.
 - Versions must only move upward.
 - Bump patch first, then minor, then major as needed.
+- Every edit to repository code or config MUST include a version bump.
+- Every version bump MUST include a matching entry in `CHANGELOG.md`.
+- Keep app/runtime version values in sync (agent version, backend `APP_VERSION`, and README current version).
+- If a change touches multiple files in one task, create one bump and one changelog entry summarizing all edits.
 
 ## Default Build Plan
 1. Scaffold backend with configuration loading, action endpoints, and JSON-backed last-5 activity log.
@@ -77,3 +81,4 @@ When implementing, always report:
 3. Run instructions (`docker compose up --build` and local dev fallback).
 4. Verification notes (stream, notification, log behavior, and Authentik-readiness).
 5. Current version and bump rationale.
+6. Changelog entry added for that version.

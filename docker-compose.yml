@@ -9,6 +9,7 @@ services:
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
       TZ: ${TZ:-UTC}
       ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/activity_log.json}
+      CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/chat_log.json}
     ports:
       - "4120:4120"
     restart: unless-stopped
