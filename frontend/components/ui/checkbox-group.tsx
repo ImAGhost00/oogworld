@@ -11,9 +11,15 @@ export function CheckboxGroup({
   className,
   ...props
 }: CheckboxGroupPrimitive.Props): React.ReactElement {
+  const rootClassName =
+    typeof className === "function"
+      ? (state: Parameters<NonNullable<typeof className>>[0]) =>
+          cn("flex flex-col items-start gap-3", className(state))
+      : cn("flex flex-col items-start gap-3", className);
+
   return (
     <CheckboxGroupPrimitive
-      className={cn("flex flex-col items-start gap-3", className)}
+      className={rootClassName}
       {...props}
     />
   );
