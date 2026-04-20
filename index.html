@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OogWorld Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <style>
+    :root {
+      --bg: #050505;
+      --card: #1f2a30;
+      --accent: #39ff14;
+      --text: #e7f5e6;
+      --muted: #9db4a5;
+    }
+
+    body {
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 12% 10%, #173121 0%, transparent 30%),
+        radial-gradient(circle at 90% 85%, #10251a 0%, transparent 38%),
+        linear-gradient(160deg, #050505 0%, #0a120d 100%);
+      color: var(--text);
+    }
+
+    .card {
+      background: linear-gradient(145deg, rgba(45, 59, 66, 0.92), rgba(25, 34, 39, 0.92));
+      border: 1px solid rgba(57, 255, 20, 0.18);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 40px rgba(0, 0, 0, 0.35);
+    }
+
+    .live-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.8);
+      animation: pulse 1.6s infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.8); }
+      100% { box-shadow: 0 0 0 14px rgba(57, 255, 20, 0); }
+    }
+
+    .action-btn {
+      transition: transform 0.14s ease, filter 0.14s ease;
+    }
+
+    .action-btn:active {
+      transform: translateY(1px) scale(0.99);
+      filter: brightness(0.95);
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-6xl px-4 pb-24 pt-6 md:pb-8 md:pt-10">
+    <header class="mb-5 flex items-center justify-between">
+      <div>
+        <p class="text-sm uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
+        <h1 class="text-2xl font-bold md:text-4xl">OogWorld Command Deck</h1>
+      </div>
+      <div class="card rounded-full px-3 py-2 text-xs md:text-sm">
+        <div class="flex items-center gap-2">
+          <span class="live-dot"></span>
+          <span>Live</span>
+        </div>
+      </div>
+    </header>
+
+    <section class="grid gap-4 md:grid-cols-5">
+      <article class="card overflow-hidden rounded-2xl md:col-span-3">
+        <div class="border-b border-lime-300/20 px-4 py-3 text-sm text-lime-200/80">Terrarium Stream</div>
+        <video id="stream" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
+      </article>
+
+      <aside class="card rounded-2xl p-4 md:col-span-2">
+        <h2 class="mb-3 text-lg font-semibold">Recent Activity</h2>
+        <ul id="activity-list" class="space-y-2 text-sm text-slate-200">
+          <li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>
+        </ul>
+      </aside>
+    </section>
+  </main>
+
+  <div class="fixed bottom-0 left-0 right-0 border-t border-lime-400/20 bg-black/80 p-3 backdrop-blur md:static md:border-none md:bg-transparent md:p-0">
+    <div class="mx-auto grid max-w-6xl grid-cols-2 gap-3 px-4 md:-mt-16 md:max-w-sm md:px-0">
+      <button id="food-btn" class="action-btn rounded-xl bg-lime-500 px-4 py-4 text-lg font-bold text-black shadow-lg shadow-lime-500/30">Request Food</button>
+      <button id="water-btn" class="action-btn rounded-xl bg-emerald-500 px-4 py-4 text-lg font-bold text-black shadow-lg shadow-emerald-500/30">Refill Water</button>
+    </div>
+  </div>
+
+  <script>
+    const streamEl = document.getElementById("stream");
+    const activityList = document.getElementById("activity-list");
+    const foodBtn = document.getElementById("food-btn");
+    const waterBtn = document.getElementById("water-btn");
+
+    async function loadHealth() {
+      const res = await fetch("/api/health");
+      if (!res.ok) return null;
+      return res.json();
+    }
+
+    async function loadActivity() {
+      const res = await fetch("/api/activity");
+      if (!res.ok) return;
+      const data = await res.json();
+      renderActivity(data.items || []);
+    }
+
+    function renderActivity(items) {
+      if (!items.length) {
+        activityList.innerHTML = '<li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>';
+        return;
+      }
+
+      activityList.innerHTML = items
+        .slice()
+        .reverse()
+        .map((item) => {
+          const stamp = new Date(item.timestamp).toLocaleString();
+          const tone = item.delivery === "sent" ? "text-lime-300" : "text-rose-300";
+          return `<li class="rounded-lg bg-black/25 p-2">
+              <div class="font-semibold">${item.action}</div>
+              <div class="${tone}">${item.delivery.toUpperCase()}</div>
+              <div class="text-xs text-slate-400">${stamp}</div>
+            </li>`;
+        })
+        .join("");
+    }
+
+    async function postAction(action) {
+      const res = await fetch("/api/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: "Request failed" }));
+        alert(body.detail || "Action failed");
+      }
+
+      await loadActivity();
+    }
+
+    function initStream(url) {
+      if (!url) return;
+      if (window.Hls && Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hls.loadSource(url);
+        hls.attachMedia(streamEl);
+      } else {
+        streamEl.src = url;
+      }
+    }
+
+    foodBtn.addEventListener("click", () => postAction("Request Food"));
+    waterBtn.addEventListener("click", () => postAction("Refill Water"));
+
+    (async () => {
+      const health = await loadHealth();
+      if (health && health.streamConfigured === "yes") {
+        initStream(health.streamUrl || "");
+      }
+      await loadActivity();
+      setInterval(loadActivity, 15000);
+    })();
+  </script>
+</body>
+</html>

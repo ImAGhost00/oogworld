@@ -1,0 +1,13 @@
+services:
+  oogworld:
+    build: .
+    container_name: oogworld
+    env_file:
+      - .env
+    environment:
+      - STREAM_URL=${STREAM_URL}
+      - NTFY_TOPIC=${NTFY_TOPIC}
+      - TZ=${TZ:-UTC}
+    ports:
+      - "4120:4120"
+    restart: unless-stopped
