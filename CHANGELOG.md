@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.2] - 2026-04-20
+- Added integration-ready React component files at `components/ui/material-ui-dropdown-menu.tsx` and `components/ui/demo.tsx`.
+- Included the provided Material-style Radix dropdown menu implementation and demo usage.
+- Documented version sync for frontend component scaffold update while current repo remains FastAPI-first.
+
+## [0.2.1] - 2026-04-20
+- Removed the welcome tip window and about tip window from the dashboard.
+- Updated chat input placeholder from `Type a note...` to `Send a message`.
+- Redesigned the UI to feel more like a streaming platform with improved channel hierarchy and visual structure.
+- Applied the 21st.dev Nature palette across the interface.
+- Kept the automatic moon-and-stars night mode behavior for Oogway's asleep state.
+- Updated backend app version to `0.2.1` and synchronized README version/features.
+
 ## [0.2.0] - 2026-04-20
 - Updated branding to present `www.ghostworld.dev` as the base identity with an OogWorld takeover visual treatment.
 - Added two closable dashboard tip cards: one for welcome-to-chat guidance and one explaining the app.

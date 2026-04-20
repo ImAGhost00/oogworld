@@ -4,36 +4,43 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>OogWorld Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
-      --bg: #000000;
-      --card: #0d0d0d;
-      --border: #1f1f1f;
-      --accent: #39ff14;
-      --text: #f5f5f5;
-      --muted: #9ca3af;
+      --bg: #1c2a1f;
+      --card: #2d3a2e;
+      --border: #3e4a3d;
+      --accent: #4caf50;
+      --accent-2: #388e3c;
+      --text: #f0ebe5;
+      --muted: #d7cfc4;
       --danger: #ef4444;
     }
 
     body {
-      font-family: "Trebuchet MS", "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-      background: radial-gradient(circle at 80% -10%, rgba(57, 255, 20, 0.12), transparent 35%), #000;
+      font-family: "Montserrat", "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+      background:
+        radial-gradient(circle at 85% -20%, rgba(129, 199, 132, 0.18), transparent 42%),
+        radial-gradient(circle at 10% 110%, rgba(56, 142, 60, 0.16), transparent 48%),
+        var(--bg);
       color: var(--text);
       transition: background 0.6s ease, color 0.3s ease;
     }
 
     body.night-mode {
       background:
-        radial-gradient(circle at 20% 10%, rgba(148, 163, 184, 0.22), transparent 28%),
-        radial-gradient(circle at 78% -20%, rgba(56, 189, 248, 0.16), transparent 40%),
-        linear-gradient(180deg, #020617 0%, #030712 55%, #000000 100%);
+        radial-gradient(circle at 18% 12%, rgba(148, 163, 184, 0.22), transparent 28%),
+        radial-gradient(circle at 74% -10%, rgba(94, 234, 212, 0.12), transparent 36%),
+        linear-gradient(180deg, #101923 0%, #0b121a 58%, #060b10 100%);
     }
 
     .night-sky {
       position: fixed;
       inset: 0;
-      z-index: 2;
+      z-index: 1;
       pointer-events: none;
       opacity: 0;
       transition: opacity 0.45s ease;
@@ -96,7 +103,7 @@
       width: min(94vw, 780px);
       border: 1px solid rgba(239, 68, 68, 0.55);
       border-radius: 10px;
-      background: linear-gradient(135deg, rgba(127, 29, 29, 0.92), rgba(69, 10, 10, 0.9));
+      background: linear-gradient(135deg, rgba(127, 29, 29, 0.94), rgba(69, 10, 10, 0.92));
       box-shadow: 0 14px 34px rgba(127, 29, 29, 0.35);
       padding: 10px 14px;
       font-size: 13px;
@@ -113,27 +120,28 @@
     }
 
     .panel {
-      background: linear-gradient(160deg, rgba(18, 18, 18, 0.95), rgba(6, 6, 6, 0.98));
-      border: 1px solid var(--border);
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+      background: linear-gradient(158deg, rgba(45, 58, 46, 0.9), rgba(28, 42, 31, 0.94));
+      border: 1px solid rgba(126, 147, 124, 0.35);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(240, 235, 229, 0.08);
+      backdrop-filter: blur(6px);
     }
 
     .cog-btn {
       width: 30px;
       height: 30px;
       border-radius: 999px;
-      border: 1px solid #2a2a2a;
+      border: 1px solid rgba(215, 224, 214, 0.25);
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      color: #d1d5db;
-      background: rgba(255, 255, 255, 0.04);
+      color: #d7e0d6;
+      background: rgba(240, 235, 229, 0.06);
       transition: transform 0.18s ease, background 0.18s ease;
     }
 
     .cog-btn:hover {
       transform: rotate(35deg);
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(240, 235, 229, 0.16);
     }
 
     .live-pulse {
@@ -227,29 +235,30 @@
       align-items: center;
       gap: 8px;
       padding: 10px 12px;
-      border-top: 1px solid #1f1f1f;
+      border-top: 1px solid rgba(215, 224, 214, 0.2);
+      background: rgba(12, 18, 12, 0.26);
     }
 
     .v-btn {
-      border: 1px solid #2a2a2a;
+      border: 1px solid rgba(215, 224, 214, 0.25);
       border-radius: 999px;
       padding: 5px 10px;
       font-size: 12px;
-      color: #e5e7eb;
-      background: rgba(255, 255, 255, 0.04);
+      color: #f0ebe5;
+      background: rgba(240, 235, 229, 0.08);
     }
 
     .v-btn:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(240, 235, 229, 0.18);
     }
 
     .daylight-banner {
-      border: 1px solid #2a2a2a;
+      border: 1px solid rgba(126, 147, 124, 0.35);
       border-radius: 10px;
       padding: 9px 12px;
       font-size: 13px;
-      color: #e5e7eb;
-      background: linear-gradient(140deg, rgba(30, 41, 59, 0.35), rgba(8, 12, 20, 0.6));
+      color: #f0ebe5;
+      background: linear-gradient(140deg, rgba(62, 74, 61, 0.6), rgba(28, 42, 31, 0.72));
       margin-bottom: 10px;
       display: none;
     }
@@ -258,50 +267,11 @@
       display: block;
     }
 
-    .tip-grid {
-      display: grid;
-      gap: 10px;
-      margin-bottom: 10px;
-      grid-template-columns: 1fr;
-    }
-
-    @media (min-width: 900px) {
-      .tip-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-
-    .tip-card {
-      border: 1px solid rgba(74, 222, 128, 0.28);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: linear-gradient(140deg, rgba(6, 78, 59, 0.36), rgba(3, 7, 18, 0.55));
-      position: relative;
-    }
-
-    .tip-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      border: 1px solid rgba(203, 213, 225, 0.28);
-      border-radius: 999px;
-      width: 22px;
-      height: 22px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #e2e8f0;
-      font-size: 12px;
-      line-height: 1;
-    }
-
-    .tip-close:hover {
-      background: rgba(255, 255, 255, 0.16);
-    }
-
     .brand-overrun {
-      border: 1px solid rgba(57, 255, 20, 0.34);
+      border: 1px solid rgba(76, 175, 80, 0.4);
       border-radius: 999px;
       padding: 3px 10px;
-      background: rgba(2, 6, 23, 0.38);
+      background: rgba(28, 42, 31, 0.62);
       display: inline-flex;
       gap: 8px;
       align-items: center;
@@ -311,14 +281,41 @@
     }
 
     .brand-overrun .ghost {
-      color: #94a3b8;
+      color: #d7cfc4;
       text-decoration: line-through;
       text-decoration-thickness: 1px;
     }
 
     .brand-overrun .oog {
-      color: #86efac;
+      color: #81c784;
       font-weight: 700;
+    }
+
+    .platform-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .platform-stat {
+      border: 1px solid rgba(126, 147, 124, 0.35);
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: linear-gradient(150deg, rgba(45, 58, 46, 0.85), rgba(31, 40, 33, 0.88));
+    }
+
+    .platform-stat .k {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #d7cfc4;
+    }
+
+    .platform-stat .v {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f0ebe5;
     }
 
     .report-icon-btn {
@@ -370,9 +367,9 @@
 
     .report-btn {
       border-radius: 10px;
-      border: 1px solid #3a3a3a;
-      background: rgba(255, 255, 255, 0.05);
-      color: #f3f4f6;
+      border: 1px solid rgba(126, 147, 124, 0.45);
+      background: rgba(240, 235, 229, 0.06);
+      color: #f0ebe5;
       font-size: 12px;
       font-weight: 700;
       padding: 10px 10px;
@@ -389,12 +386,12 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      border: 1px solid #3f1a1a;
+      border: 1px solid rgba(76, 175, 80, 0.45);
       border-radius: 999px;
       padding: 4px 9px;
       font-size: 11px;
-      color: #fecaca;
-      background: rgba(127, 29, 29, 0.22);
+      color: #d7e0d6;
+      background: rgba(56, 142, 60, 0.24);
     }
 
     .admin-delete-btn {
@@ -420,6 +417,10 @@
     }
 
     @media (max-width: 767px) {
+      .platform-strip {
+        grid-template-columns: 1fr;
+      }
+
       .mobile-sticky-video {
         position: sticky;
         top: 0;
@@ -434,22 +435,23 @@
 
   <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85">
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-slate-300/80">www.ghostworld.dev</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-[#d7cfc4]/80">www.ghostworld.dev</p>
       <h1 class="mt-1 text-3xl font-bold">OogWorld Takeover</h1>
       <p class="mt-2 text-sm text-slate-400">Enter your username to join chat.</p>
       <input id="username-input" type="text" maxlength="24" autocomplete="off" placeholder="Username"
-        class="mt-5 w-full rounded-xl border border-lime-500/30 bg-black/50 px-4 py-3 text-center outline-none focus:border-lime-400" />
+        class="mt-5 w-full rounded-xl border border-[#4caf50]/40 bg-black/50 px-4 py-3 text-center outline-none focus:border-[#81c784]" />
       <button id="login-btn"
-        class="mt-4 w-full rounded-xl bg-lime-500 py-3 text-sm font-bold uppercase tracking-wide text-black">Enter</button>
+        class="mt-4 w-full rounded-xl bg-[#4caf50] py-3 text-sm font-bold uppercase tracking-wide text-[#0a1f0c]">Enter</button>
     </div>
   </div>
 
-  <div id="app" class="hidden">
+  <div id="app" class="relative z-10 hidden">
     <main class="mx-auto max-w-7xl px-3 pb-24 pt-4 md:px-4 md:pb-8 md:pt-6">
       <header class="mb-3 flex items-center justify-between">
         <div>
           <p class="brand-overrun"><span class="ghost">www.ghostworld.dev</span><span class="oog">oogworld takeover</span></p>
-          <h1 class="text-2xl font-bold md:text-3xl">OogWorld Stream + Chat</h1>
+          <h1 class="text-2xl font-bold md:text-3xl">OogWorld Channel</h1>
+          <p class="mt-1 text-xs text-[#d7cfc4]/85">Live habitat stream, live chat, and care alerts in one place</p>
         </div>
         <div class="flex items-center gap-2">
           <button id="admin-btn" class="v-btn">Admin</button>
@@ -457,24 +459,27 @@
         </div>
       </header>
 
-      <div id="daylight-banner" class="daylight-banner"></div>
-      <div id="tip-grid" class="tip-grid">
-        <article id="tip-welcome" class="tip-card">
-          <button id="tip-welcome-close" class="tip-close" title="Dismiss">&#10005;</button>
-          <p class="mb-1 text-xs uppercase tracking-[0.22em] text-emerald-200/80">Welcome To Chat</p>
-          <p class="text-sm text-slate-100/95">Welcome to the chat. Keep it friendly, short, and useful so Oogway care updates are easy to spot.</p>
-        </article>
-        <article id="tip-about" class="tip-card">
-          <button id="tip-about-close" class="tip-close" title="Dismiss">&#10005;</button>
-          <p class="mb-1 text-xs uppercase tracking-[0.22em] text-emerald-200/80">About OogWorld</p>
-          <p class="text-sm text-slate-100/95">This is www.ghostworld.dev, but Oogway took over. Live stream, care requests, emergency reports, and admin controls all live here.</p>
-        </article>
+      <div class="platform-strip">
+        <div class="platform-stat">
+          <div class="k">Channel</div>
+          <div class="v">Oogway Habitat Live</div>
+        </div>
+        <div class="platform-stat">
+          <div class="k">Status</div>
+          <div class="v">Streaming Now</div>
+        </div>
+        <div class="platform-stat">
+          <div class="k">Mood</div>
+          <div class="v">Nature Calm</div>
+        </div>
       </div>
+
+      <div id="daylight-banner" class="daylight-banner"></div>
 
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <div class="text-sm text-slate-200">MediaMTX WebRTC Stream</div>
+            <div class="text-sm text-slate-100">Now Streaming: Oogway Cam</div>
             <div class="flex items-center gap-2">
               <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
                 <img src="/images/red-triangle-warning-icon.svg" alt="Report issue" />
@@ -503,9 +508,9 @@
 
           <div class="border-t border-neutral-800 p-2">
             <div class="flex gap-2">
-              <input id="chat-input" type="text" maxlength="240" autocomplete="off" placeholder="Type a note..."
-                class="w-full rounded-lg border border-lime-500/25 bg-black/50 px-3 py-2 text-sm outline-none focus:border-lime-400" />
-              <button id="chat-send" class="rounded-lg bg-lime-500 px-3 py-2 text-sm font-bold text-black">Send</button>
+              <input id="chat-input" type="text" maxlength="240" autocomplete="off" placeholder="Send a message"
+                class="w-full rounded-lg border border-[#4caf50]/30 bg-black/45 px-3 py-2 text-sm outline-none focus:border-[#81c784]" />
+              <button id="chat-send" class="rounded-lg bg-[#4caf50] px-3 py-2 text-sm font-bold text-[#0a1f0c]">Send</button>
             </div>
           </div>
         </aside>
@@ -521,7 +526,7 @@
       </div>
       <label class="mb-1 block text-xs text-slate-400">Display Name</label>
       <input id="chat-name-input" type="text" maxlength="24" autocomplete="off"
-        class="mb-3 w-full rounded-lg border border-lime-500/30 bg-black/50 px-3 py-2 text-sm outline-none focus:border-lime-400" />
+        class="mb-3 w-full rounded-lg border border-[#4caf50]/35 bg-black/45 px-3 py-2 text-sm outline-none focus:border-[#81c784]" />
 
       <label class="mb-1 block text-xs text-slate-400">Badge Color</label>
       <div id="chat-color-swatches" class="mb-3 flex flex-wrap gap-2"></div>
@@ -529,16 +534,16 @@
       <label class="mb-1 block text-xs text-slate-400">Chat Text Color</label>
       <div class="mb-4 flex gap-3 text-sm">
         <label class="inline-flex items-center gap-2">
-          <input type="radio" name="chatTextColor" value="white" checked class="accent-lime-400" />
+          <input type="radio" name="chatTextColor" value="white" checked class="accent-[#4caf50]" />
           <span>White</span>
         </label>
         <label class="inline-flex items-center gap-2">
-          <input type="radio" name="chatTextColor" value="black" class="accent-lime-400" />
+          <input type="radio" name="chatTextColor" value="black" class="accent-[#4caf50]" />
           <span>Black</span>
         </label>
       </div>
 
-      <button id="chat-settings-save" class="w-full rounded-lg bg-lime-500 py-2 text-sm font-bold text-black">Save</button>
+      <button id="chat-settings-save" class="w-full rounded-lg bg-[#4caf50] py-2 text-sm font-bold text-[#0a1f0c]">Save</button>
     </div>
   </div>
 
@@ -551,19 +556,19 @@
 
       <label class="mb-1 block text-xs text-slate-400">Autoplay on load</label>
       <label class="mb-3 inline-flex items-center gap-2 text-sm">
-        <input id="video-autoplay" type="checkbox" class="accent-lime-400" />
+        <input id="video-autoplay" type="checkbox" class="accent-[#4caf50]" />
         <span>Enabled</span>
       </label>
 
       <label class="mb-1 block text-xs text-slate-400">Reload on reconnect</label>
       <label class="mb-3 inline-flex items-center gap-2 text-sm">
-        <input id="video-auto-reload" type="checkbox" class="accent-lime-400" />
+        <input id="video-auto-reload" type="checkbox" class="accent-[#4caf50]" />
         <span>Enabled</span>
       </label>
 
       <p class="mb-4 text-xs text-slate-400">WebRTC-only mode is active for reliability.</p>
 
-      <button id="video-settings-save" class="w-full rounded-lg bg-lime-500 py-2 text-sm font-bold text-black">Save</button>
+      <button id="video-settings-save" class="w-full rounded-lg bg-[#4caf50] py-2 text-sm font-bold text-[#0a1f0c]">Save</button>
     </div>
   </div>
 
@@ -612,11 +617,11 @@
 
       var CHAT_RETRY_MS = 2500;
       var DAYLIGHT_REFRESH_MS = 5 * 60 * 1000;
-      var COLOR_OPTIONS = ["#39ff14", "#22d3ee", "#60a5fa", "#a78bfa", "#f472b6", "#fb923c", "#facc15", "#ffffff", "#94a3b8"];
+      var COLOR_OPTIONS = ["#4caf50", "#388e3c", "#81c784", "#66bb6a", "#d7e0d6", "#f0ebe5", "#3e4a3d", "#2d3a2e", "#a5d6a7"];
 
       var state = {
         username: sessionStorage.getItem("oogworld_username") || "",
-        badgeColor: sessionStorage.getItem("oogworld_badge_color") || "#39ff14",
+        badgeColor: sessionStorage.getItem("oogworld_badge_color") || "#4caf50",
         chatTextColor: sessionStorage.getItem("oogworld_chat_text_color") || "white",
         adminToken: sessionStorage.getItem("oogworld_admin_token") || "",
         streams: {},
@@ -644,11 +649,6 @@
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
-        tipGrid: document.getElementById("tip-grid"),
-        tipWelcome: document.getElementById("tip-welcome"),
-        tipWelcomeClose: document.getElementById("tip-welcome-close"),
-        tipAbout: document.getElementById("tip-about"),
-        tipAboutClose: document.getElementById("tip-about-close"),
         chatMessages: document.getElementById("chat-messages"),
         chatInput: document.getElementById("chat-input"),
         chatSend: document.getElementById("chat-send"),
@@ -686,10 +686,6 @@
       };
 
       var reportBannerTimer = null;
-      var tipState = {
-        welcome: localStorage.getItem("oog_tip_welcome_closed") === "1",
-        about: localStorage.getItem("oog_tip_about_closed") === "1",
-      };
 
       function escHtml(s) {
         return String(s)
@@ -773,25 +769,6 @@
       function setNightMode(active) {
         document.body.classList.toggle("night-mode", !!active);
         el.nightSky.classList.toggle("show", !!active);
-      }
-
-      function renderTips() {
-        el.tipWelcome.style.display = tipState.welcome ? "none" : "block";
-        el.tipAbout.style.display = tipState.about ? "none" : "block";
-        var allHidden = tipState.welcome && tipState.about;
-        el.tipGrid.style.display = allHidden ? "none" : "grid";
-      }
-
-      function closeTip(name) {
-        if (name === "welcome") {
-          tipState.welcome = true;
-          localStorage.setItem("oog_tip_welcome_closed", "1");
-        }
-        if (name === "about") {
-          tipState.about = true;
-          localStorage.setItem("oog_tip_about_closed", "1");
-        }
-        renderTips();
       }
 
       async function loadDaylight() {
@@ -1213,7 +1190,6 @@
 
       async function bootstrap() {
         applyBadge();
-        renderTips();
 
         var health = await loadHealth();
         if (!health || !health.streams || (!health.streams.webrtc && !health.streams.webrtcDirect)) {
@@ -1304,13 +1280,6 @@
       el.videoSettingsSave.addEventListener("click", saveVideoSettings);
       el.videoSettingsModal.addEventListener("click", function (e) {
         if (e.target === el.videoSettingsModal) closeVideoSettings();
-      });
-
-      el.tipWelcomeClose.addEventListener("click", function () {
-        closeTip("welcome");
-      });
-      el.tipAboutClose.addEventListener("click", function () {
-        closeTip("about");
       });
 
       if (state.username) {

@@ -119,12 +119,13 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 - **Red Alert Banner**: Displays `USER has reported that Oogway needs XXX` and a live timer since report time
 - **Admin Panel**: Password-gated admin tools for resetting alerts, deleting chat messages, and clearing chat log
 - **GhostWorld Takeover Branding**: UI now presents `www.ghostworld.dev` as overtaken by OogWorld
-- **Closable Tip Cards**: Dismissible welcome and app-info tips shown in the main dashboard
+- **Streaming Platform UI**: Refined channel-style header, stats strip, cleaner hierarchy, and improved visual balance
+- **Nature Theme Palette**: Uses the 21st.dev Nature color palette (`#1c2a1f`, `#2d3a2e`, `#4caf50`, `#388e3c`, `#f0ebe5`)
 - **Heatlamp Daylight Automation**: Sunrise/sunset schedule fetched from `https://sunrise-sunset.org/api` several times per day
 - **Bedtime Banners**: Countdown appears before sunset; overnight banner shows `oogway is asleep, his heatlamp will turn on in XX:XX`
 - **Night Mode**: When Oogway is asleep, the app shifts into moon-and-stars night theme
 - **Responsive Design**: Desktop layout (video left, controls right) and mobile stack (video top, buttons bottom)
-- **GhostWorld Aesthetic**: Dark theme with accent colors (#39FF14 lime, #050505 background)
+- **GhostWorld Aesthetic**: Nature-inspired dark palette with forest greens and warm neutral text
 - **Live Status Pulse**: Animated breathing dot indicates stream is live
 
 ## Activity Log
@@ -167,7 +168,7 @@ The application is designed with extension points for:
 
 ## Version
 
-- Current: 0.2.0
+- Current: 0.2.2
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog
