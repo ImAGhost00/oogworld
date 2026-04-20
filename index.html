@@ -604,7 +604,20 @@
 
       var CHAT_RETRY_MS = 2500;
       var DAYLIGHT_REFRESH_MS = 5 * 60 * 1000;
-      var COLOR_OPTIONS = ["#4caf50", "#388e3c", "#81c784", "#66bb6a", "#d7e0d6", "#f0ebe5", "#3e4a3d", "#2d3a2e", "#a5d6a7"];
+      var COLOR_OPTIONS = [
+        "#ef4444", "#b91c1c", // red
+        "#f97316", "#c2410c", // orange
+        "#eab308", "#ca8a04", // yellow
+        "#22c55e", "#15803d", // green
+        "#14b8a6", "#0f766e", // teal
+        "#3b82f6", "#1d4ed8", // blue
+        "#6366f1", "#4338ca", // indigo
+        "#a855f7", "#7e22ce", // purple
+        "#ec4899", "#be185d", // pink
+        "#a16207", "#78350f", // brown
+        "#9ca3af", "#4b5563", // gray
+        "#64748b", "#334155", // slate
+      ];
 
       var state = {
         username: sessionStorage.getItem("oogworld_username") || "",

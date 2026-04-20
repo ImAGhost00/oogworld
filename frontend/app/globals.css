@@ -12,6 +12,23 @@
   --muted: #2d3a2e;
   --muted-foreground: #d7cfc4;
   --ring: #4caf50;
+  --color-red-500: #ef4444;
+  --color-green-500: #22c55e;
+  --color-blue-500: #3b82f6;
+  --color-yellow-500: #eab308;
+  --color-purple-500: #a855f7;
+  --color-pink-500: #ec4899;
+  --color-indigo-500: #6366f1;
+  --color-orange-500: #f97316;
+  --color-teal-500: #14b8a6;
+  --color-cyan-500: #06b6d4;
+  --color-lime-500: #84cc16;
+  --color-emerald-500: #10b981;
+  --color-violet-500: #8b5cf6;
+  --color-fuchsia-500: #d946ef;
+  --color-rose-500: #f43f5e;
+  --color-sky-500: #0ea5e9;
+  --color-amber-500: #f59e0b;
 }
 
 body {
