@@ -830,10 +830,10 @@
         if (Hls.isSupported()) {
           var hls = new Hls({
             lowLatencyMode: false,
-            liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 6,
-            maxLiveSyncPlaybackRate: 1.05,
-            maxBufferLength: 10,
+            liveSyncDurationCount: 2,
+            liveMaxLatencyDurationCount: 4,
+            maxLiveSyncPlaybackRate: 1.1,
+            maxBufferLength: 6,
             backBufferLength: 20,
           });
           _hlsInstance = hls;

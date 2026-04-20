@@ -1,4 +1,22 @@
 services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: oogworld-mediamtx
+    environment:
+      MTX_HLS: "yes"
+      MTX_HLSVARIANT: mpegts
+      MTX_HLSSEGMENTCOUNT: "6"
+      MTX_HLSSEGMENTDURATION: 0.5s
+      MTX_HLSALWAYSREMUX: "yes"
+      MTX_HLSALLOWORIGIN: "*"
+      MTX_RTMP: "yes"
+      MTX_RTSP: "yes"
+      MTX_WEBRTC: "no"
+      MTX_LOGLEVEL: info
+    ports:
+      - "1935:1935"   # RTMP — wall PC pushes here
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend
@@ -11,10 +29,11 @@ services:
   oogworld:
     build: .
     container_name: oogworld
+    depends_on:
+      - mediamtx
     environment:
-      # MediaMTX runs natively on Windows; point to its IP/hostname and port 8889 (WebRTC)
-      # Example: STREAM_URL=http://192.168.1.100:8889/oogway (replace with your Windows IP)
-      STREAM_URL: ${STREAM_URL:-http://localhost:8889/oogway}
+      # MediaMTX runs as a Docker service; wall PC pushes RTMP to server port 1935.
+      STREAM_URL: ${STREAM_URL:-http://mediamtx:8888/oogway}
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
       TZ: ${TZ:-UTC}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
