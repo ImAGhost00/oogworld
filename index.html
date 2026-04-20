@@ -17,9 +17,34 @@
     }
 
     body {
-      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      font-family: "Trebuchet MS", "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
       background: radial-gradient(circle at 80% -10%, rgba(57, 255, 20, 0.12), transparent 35%), #000;
       color: var(--text);
+    }
+
+    .report-banner {
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translate(-50%, -8px);
+      z-index: 65;
+      width: min(94vw, 780px);
+      border: 1px solid rgba(239, 68, 68, 0.55);
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(127, 29, 29, 0.92), rgba(69, 10, 10, 0.9));
+      box-shadow: 0 14px 34px rgba(127, 29, 29, 0.35);
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #fee2e2;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+
+    .report-banner.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+      pointer-events: auto;
     }
 
     .panel {
@@ -153,6 +178,53 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .report-toggle-btn {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid rgba(248, 113, 113, 0.55);
+      background: linear-gradient(135deg, rgba(220, 38, 38, 0.88), rgba(153, 27, 27, 0.88));
+      color: #fff;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      padding: 10px 12px;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
+    .report-panel {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      opacity: 1;
+      max-height: 120px;
+      transition: opacity 0.2s ease, max-height 0.24s ease;
+    }
+
+    .report-panel.hidden {
+      opacity: 0;
+      max-height: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .report-btn {
+      border-radius: 10px;
+      border: 1px solid #3a3a3a;
+      background: rgba(255, 255, 255, 0.05);
+      color: #f3f4f6;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 10px 10px;
+    }
+
+    .report-btn.active {
+      border-color: rgba(248, 113, 113, 0.9);
+      background: rgba(220, 38, 38, 0.28);
+      color: #fee2e2;
+      box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.35) inset;
+    }
+
     .live-chip {
       display: inline-flex;
       align-items: center;
@@ -175,6 +247,8 @@
   </style>
 </head>
 <body class="min-h-screen">
+  <div id="report-banner" class="report-banner"></div>
+
   <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85">
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
@@ -213,9 +287,8 @@
           </div>
           <div class="video-controls">
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
-            <button id="video-live-btn" class="v-btn">Go Live</button>
             <button id="video-popout-btn" class="v-btn">Open Player</button>
-            <span class="ml-auto text-xs text-slate-400">Controls themed for WebRTC player</span>
+            <span class="ml-auto text-xs text-slate-400">Tunnel-safe stream routing enabled</span>
           </div>
         </article>
 
@@ -227,9 +300,12 @@
 
           <div id="chat-messages" class="chat-scroll flex-1 overflow-y-auto px-3 py-2 text-sm"></div>
 
-          <div class="grid grid-cols-2 gap-2 border-t border-neutral-800 p-3">
-            <button id="feed-btn" class="rounded-lg bg-lime-500 px-3 py-3 text-sm font-bold text-black">FEED OOGWAY</button>
-            <button id="water-btn" class="rounded-lg bg-emerald-500 px-3 py-3 text-sm font-bold text-black">REFILL WATER</button>
+          <div class="border-t border-neutral-800 p-3">
+            <button id="report-toggle-btn" class="report-toggle-btn">🚨 Emergency Report</button>
+            <div id="report-panel" class="report-panel hidden">
+              <button id="report-food-btn" class="report-btn">🍽️ Food Issue</button>
+              <button id="report-water-btn" class="report-btn">💧 Water Issue</button>
+            </div>
           </div>
 
           <div class="border-t border-neutral-800 p-2">
@@ -312,6 +388,10 @@
         streams: {},
         ws: null,
         seenMessageIds: {},
+        reports: {
+          food: { active: false, reporter: "" },
+          water: { active: false, reporter: "" },
+        },
       };
 
       var videoPrefs = JSON.parse(localStorage.getItem("oogworld_video_prefs") || "{}");
@@ -325,13 +405,15 @@
         loginBtn: document.getElementById("login-btn"),
         usernameBadge: document.getElementById("username-badge"),
         webrtcFrame: document.getElementById("webrtc-frame"),
+        reportBanner: document.getElementById("report-banner"),
         chatMessages: document.getElementById("chat-messages"),
         chatInput: document.getElementById("chat-input"),
         chatSend: document.getElementById("chat-send"),
-        feedBtn: document.getElementById("feed-btn"),
-        waterBtn: document.getElementById("water-btn"),
+        reportToggleBtn: document.getElementById("report-toggle-btn"),
+        reportPanel: document.getElementById("report-panel"),
+        reportFoodBtn: document.getElementById("report-food-btn"),
+        reportWaterBtn: document.getElementById("report-water-btn"),
         videoRefreshBtn: document.getElementById("video-refresh-btn"),
-        videoLiveBtn: document.getElementById("video-live-btn"),
         videoPopoutBtn: document.getElementById("video-popout-btn"),
         chatSettingsBtn: document.getElementById("chat-settings-btn"),
         chatSettingsClose: document.getElementById("chat-settings-close"),
@@ -392,6 +474,10 @@
 
         el.chatMessages.appendChild(row);
         el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+
+        if (msg.kind === "report") {
+          loadReports();
+        }
       }
 
       async function loadHealth() {
@@ -447,19 +533,73 @@
         el.chatInput.value = "";
       }
 
-      async function triggerAction(action) {
+      async function loadReports() {
         try {
-          var resp = await fetch("/api/actions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: action, username: state.username }),
-          });
-          if (!resp.ok) {
-            var payload = await resp.json().catch(function () { return { detail: "Action failed" }; });
-            alert(payload.detail || "Action failed");
+          var resp = await fetch("/api/reports");
+          if (!resp.ok) return;
+          var payload = await resp.json();
+          if (payload && payload.items) {
+            state.reports = payload.items;
+            renderReports();
           }
         } catch (e) {
-          alert("Network error while sending action");
+          // keep current state on transient failure
+        }
+      }
+
+      function renderReports() {
+        var foodActive = !!(state.reports.food && state.reports.food.active);
+        var waterActive = !!(state.reports.water && state.reports.water.active);
+
+        el.reportFoodBtn.classList.toggle("active", foodActive);
+        el.reportWaterBtn.classList.toggle("active", waterActive);
+        el.reportFoodBtn.textContent = (foodActive ? "✅ " : "🍽️ ") + "Food Issue";
+        el.reportWaterBtn.textContent = (waterActive ? "✅ " : "💧 ") + "Water Issue";
+
+        var lines = [];
+        if (foodActive) {
+          var byFood = state.reports.food.reporter || "Someone";
+          lines.push("🍽️ " + byFood + " reported Oogway is out of food");
+        }
+        if (waterActive) {
+          var byWater = state.reports.water.reporter || "Someone";
+          lines.push("💧 " + byWater + " reported Oogway is out of water");
+        }
+
+        if (lines.length) {
+          el.reportBanner.textContent = "🚨 " + lines.join(" | ");
+          el.reportBanner.classList.add("show");
+        } else {
+          el.reportBanner.classList.remove("show");
+          setTimeout(function () {
+            if (!el.reportBanner.classList.contains("show")) {
+              el.reportBanner.textContent = "";
+            }
+          }, 320);
+        }
+      }
+
+      async function toggleReport(kind) {
+        var curr = !!(state.reports[kind] && state.reports[kind].active);
+        var next = !curr;
+        try {
+          var resp = await fetch("/api/reports/toggle", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind: kind,
+              active: next,
+              username: state.username,
+            }),
+          });
+          if (!resp.ok) {
+            var payload = await resp.json().catch(function () { return { detail: "Report request failed" }; });
+            alert(payload.detail || "Report request failed");
+            return;
+          }
+          await loadReports();
+        } catch (e) {
+          alert("Network error while sending report");
         }
       }
 
@@ -535,7 +675,7 @@
       }
 
       function openPlayerTab() {
-        var url = state.streams.webrtc || "";
+        var url = state.streams.webrtcDirect || state.streams.webrtc || "";
         if (!url) return;
         window.open(url, "_blank", "noopener,noreferrer");
       }
@@ -561,6 +701,8 @@
         state.streams = health.streams;
         setWebRtcSource(true);
         connectChat();
+        await loadReports();
+        setInterval(loadReports, 15000);
       }
 
       el.loginBtn.addEventListener("click", doLogin);
@@ -573,17 +715,17 @@
         if (e.key === "Enter") sendChat();
       });
 
-      el.feedBtn.addEventListener("click", function () {
-        triggerAction("Request Food");
+      el.reportToggleBtn.addEventListener("click", function () {
+        el.reportPanel.classList.toggle("hidden");
       });
-      el.waterBtn.addEventListener("click", function () {
-        triggerAction("Refill Water");
+      el.reportFoodBtn.addEventListener("click", function () {
+        toggleReport("food");
+      });
+      el.reportWaterBtn.addEventListener("click", function () {
+        toggleReport("water");
       });
 
       el.videoRefreshBtn.addEventListener("click", function () {
-        setWebRtcSource(true);
-      });
-      el.videoLiveBtn.addEventListener("click", function () {
         setWebRtcSource(true);
       });
       el.videoPopoutBtn.addEventListener("click", openPlayerTab);

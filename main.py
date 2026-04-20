@@ -6,13 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-APP_VERSION = "0.0.1"
+APP_VERSION = "0.0.8"
 BASE_DIR = Path(__file__).parent
 ACTION_LOG_PATH = Path(os.getenv("ACTIVITY_LOG_PATH", BASE_DIR / "activity_log.json"))
 CHAT_LOG_PATH = Path(os.getenv("CHAT_LOG_PATH", BASE_DIR / "chat_log.json"))
@@ -46,12 +47,27 @@ class ChatMessage(BaseModel):
     textColor: Literal["white", "black"] | None = "white"
 
 
+class ReportToggleRequest(BaseModel):
+    kind: Literal["food", "water"]
+    active: bool
+    username: str | None = None
+
+
 app = FastAPI(title="OogWorld", version=APP_VERSION)
 CHAT_CLIENTS: set[WebSocket] = set()
+ACTIVE_REPORTS: dict[str, dict[str, Any]] = {
+    "food": {"active": False, "reporter": "", "updatedAt": ""},
+    "water": {"active": False, "reporter": "", "updatedAt": ""},
+}
+
+REPORT_CONFIG: dict[str, dict[str, str]] = {
+    "food": {"emoji": "🍽️", "label": "food", "problem": "out of food"},
+    "water": {"emoji": "💧", "label": "water", "problem": "out of water"},
+}
 
 
 def derive_stream_urls(base: str) -> dict[str, str]:
-    """Compute MediaMTX URLs from a single base stream URL."""
+    """Compute same-origin proxy URLs plus direct MediaMTX URLs."""
     if not base:
         return {}
     base = base.rstrip("/")
@@ -60,15 +76,66 @@ def derive_stream_urls(base: str) -> dict[str, str]:
     parsed = urlparse(base)
     host_only = parsed.hostname or ""
     scheme = parsed.scheme or "http"
-    path = parsed.path
+    path = parsed.path.lstrip("/")
 
     def swap_port(p: int) -> str:
-        return urlunparse((scheme, f"{host_only}:{p}", path, "", "", ""))
+        return urlunparse((scheme, f"{host_only}:{p}", f"/{path}", "", "", ""))
 
-    webrtc = swap_port(8889) + "/"
-    hls = swap_port(8888) + "/index.m3u8"
-    rtsp = f"rtsp://{host_only}:8554{path}"
-    return {"webrtc": webrtc, "hls": hls, "rtsp": rtsp}
+    webrtc_direct = swap_port(8889) + "/"
+    hls_direct = swap_port(8888) + "/index.m3u8"
+    rtsp = f"rtsp://{host_only}:8554/{path}"
+
+    # Proxy paths keep stream access on current app domain (tunnel-safe).
+    webrtc_proxy = f"/media/webrtc/{path}/"
+    hls_proxy = f"/media/hls/{path}/index.m3u8"
+    return {
+        "webrtc": webrtc_proxy,
+        "hls": hls_proxy,
+        "webrtcDirect": webrtc_direct,
+        "hlsDirect": hls_direct,
+        "rtsp": rtsp,
+    }
+
+
+def get_stream_origin(base: str) -> str:
+    parsed = urlparse(base.rstrip("/"))
+    if not parsed.hostname:
+        return ""
+    scheme = parsed.scheme or "http"
+    return f"{scheme}://{parsed.hostname}"
+
+
+async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Response:
+    if mode not in {"webrtc", "hls"}:
+        raise HTTPException(status_code=404, detail="Unknown stream mode")
+    if not STREAM_URL:
+        raise HTTPException(status_code=503, detail="STREAM_URL is not configured")
+
+    origin = get_stream_origin(STREAM_URL)
+    if not origin:
+        raise HTTPException(status_code=500, detail="STREAM_URL is invalid")
+
+    upstream_port = 8889 if mode == "webrtc" else 8888
+    query = request.url.query
+    upstream_url = f"{origin}:{upstream_port}/{stream_path}"
+    if query:
+        upstream_url += f"?{query}"
+
+    # Keep proxy lean and explicit; enough headers for MediaMTX player assets/segments.
+    fwd_headers = {
+        "Accept": request.headers.get("accept", "*/*"),
+        "User-Agent": request.headers.get("user-agent", "oogworld-proxy"),
+    }
+
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        upstream = await client.get(upstream_url, headers=fwd_headers)
+
+    passthrough = {}
+    for key in ["content-type", "cache-control", "etag", "last-modified"]:
+        val = upstream.headers.get(key)
+        if val:
+            passthrough[key] = val
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=passthrough)
 
 
 def ensure_list_file(path: Path) -> None:
@@ -165,6 +232,11 @@ def index() -> FileResponse:
     return FileResponse(BASE_DIR / "index.html")
 
 
+@app.get("/media/{mode}/{stream_path:path}")
+async def media_proxy(mode: str, stream_path: str, request: Request) -> Response:
+    return await proxy_mediastream(mode, stream_path, request)
+
+
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     return {
@@ -185,6 +257,11 @@ def activity() -> dict[str, list[dict[str, Any]]]:
 @app.get("/api/chat/history")
 def chat_history() -> dict[str, list[dict[str, Any]]]:
     return {"items": read_chat_log()}
+
+
+@app.get("/api/reports")
+def get_reports() -> dict[str, dict[str, Any]]:
+    return {"items": ACTIVE_REPORTS}
 
 
 @app.websocket("/ws/chat")
@@ -255,3 +332,53 @@ async def trigger_action(payload: ActionRequest, request: Request) -> dict[str, 
         raise
 
     return {"ok": True, "item": action_item}
+
+
+@app.post("/api/reports/toggle")
+async def toggle_report(payload: ReportToggleRequest, request: Request) -> dict[str, Any]:
+    if not NTFY_TOPIC:
+        raise HTTPException(status_code=500, detail="NTFY_TOPIC is not configured")
+
+    actor = auth_placeholder_username(request, payload.username)
+    cfg = REPORT_CONFIG[payload.kind]
+    now = datetime.now(timezone.utc).isoformat()
+
+    ACTIVE_REPORTS[payload.kind] = {
+        "active": payload.active,
+        "reporter": actor if payload.active else "",
+        "updatedAt": now,
+    }
+
+    if payload.active:
+        chat_text = f"{cfg['emoji']} {actor} has reported that Oogway is {cfg['problem']}"
+        notify_text = f"{cfg['emoji']} Emergency report from {actor}: Oogway is {cfg['problem']}."
+    else:
+        chat_text = f"✅ {actor} marked the {cfg['label']} report as resolved"
+        notify_text = f"✅ {actor} resolved the {cfg['label']} emergency report."
+
+    chat_item = {
+        "id": str(uuid.uuid4()),
+        "kind": "report",
+        "username": actor,
+        "usernameColor": "#ef4444",
+        "text": chat_text,
+        "textColor": "white",
+        "ts": now,
+        "report": {
+            "kind": payload.kind,
+            "active": payload.active,
+        },
+    }
+    append_chat_log(chat_item)
+    await broadcast_chat(chat_item)
+    await send_ntfy_message(NTFY_TOPIC, notify_text)
+
+    return {
+        "ok": True,
+        "report": {
+            "kind": payload.kind,
+            "active": payload.active,
+            "reporter": actor,
+            "updatedAt": now,
+        },
+    }

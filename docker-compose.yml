@@ -3,9 +3,9 @@ services:
     build: .
     container_name: oogworld
     environment:
-      # Set these via Portainer's UI or pass at runtime:
-      # docker compose -e STREAM_URL=... -e NTFY_TOPIC=... up
-      STREAM_URL: ${STREAM_URL:-http://10.0.0.177:8889/oogway}
+      # MediaMTX runs natively on Windows; point to its IP/hostname and port 8889 (WebRTC)
+      # Example: STREAM_URL=http://192.168.1.100:8889/oogway (replace with your Windows IP)
+      STREAM_URL: ${STREAM_URL:-http://localhost:8889/oogway}
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
       TZ: ${TZ:-UTC}
       ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/activity_log.json}

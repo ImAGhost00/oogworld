@@ -1,7 +1,7 @@
 ---
 description: "Use when building Oog-World tortoise terrarium dashboard features: FastAPI backend, Tailwind SPA, HLS.js live stream, ntfy notifications, GhostWorld dark UI, Docker deployment."
 name: "OogWorld Builder"
-version: "0.0.1"
+version: "0.0.8"
 tools: [read, edit, search, execute, todo]
 user-invocable: true
 ---

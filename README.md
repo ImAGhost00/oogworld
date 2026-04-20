@@ -119,7 +119,7 @@ The application is designed with extension points for:
 
 ## Version
 
-- Current: 0.0.1
+- Current: 0.0.8
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog
