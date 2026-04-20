@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -148,7 +148,6 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
     if query:
         upstream_url += f"?{query}"
 
-    # Forward core request headers so MediaMTX WebRTC signaling endpoints behave correctly.
     fwd_headers = {
         "Accept": request.headers.get("accept", "*/*"),
         "User-Agent": request.headers.get("user-agent", "oogworld-proxy"),
@@ -160,17 +159,21 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
 
     body = await request.body()
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        upstream = await client.request(
-            request.method,
-            upstream_url,
-            headers=fwd_headers,
-            content=body if body else None,
-        )
+    is_playlist = stream_path.endswith(".m3u8") or stream_path.endswith(".m3u")
 
-    passthrough = {}
+    client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
+    upstream_req = client.build_request(
+        request.method,
+        upstream_url,
+        headers=fwd_headers,
+        content=body if body else None,
+    )
+    upstream = await client.send(upstream_req, stream=True)
+
+    passthrough: dict[str, str] = {}
     for key in [
         "content-type",
+        "content-length",
         "cache-control",
         "etag",
         "last-modified",
@@ -183,7 +186,25 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
         val = upstream.headers.get(key)
         if val:
             passthrough[key] = val
-    return Response(content=upstream.content, status_code=upstream.status_code, headers=passthrough)
+
+    # Playlists must never be cached so HLS.js always gets the latest segment list.
+    if is_playlist:
+        passthrough["cache-control"] = "no-cache, no-store"
+        passthrough.pop("etag", None)
+
+    async def stream_body():
+        try:
+            async for chunk in upstream.aiter_bytes(chunk_size=8192):
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        stream_body(),
+        status_code=upstream.status_code,
+        headers=passthrough,
+    )
 
 
 def ensure_list_file(path: Path) -> None:
