@@ -2,12 +2,16 @@ services:
   oogworld:
     build: .
     container_name: oogworld
-    env_file:
-      - .env
     environment:
-      - STREAM_URL=${STREAM_URL}
-      - NTFY_TOPIC=${NTFY_TOPIC}
-      - TZ=${TZ:-UTC}
+      # Set these via Portainer's UI or pass at runtime:
+      # docker compose -e STREAM_URL=... -e NTFY_TOPIC=... up
+      STREAM_URL: ${STREAM_URL:-http://localhost:8554/oogway/index.m3u8}
+      NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
+      TZ: ${TZ:-UTC}
+      ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/activity_log.json}
     ports:
       - "4120:4120"
     restart: unless-stopped
+    # For local dev only (Portainer ignores this):
+    # env_file:
+    #   - .env

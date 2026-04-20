@@ -33,8 +33,22 @@ This captures from a Logitech C922 Pro Stream Webcam, encodes with H.264 Quick S
 
 ### 1. Configure Environment
 
+#### With Portainer (Recommended)
+
+1. In Portainer, create a new stack and paste the `docker-compose.yml` file
+2. In the **Environment variables** section, add:
+   - `STREAM_URL` → `http://localhost:8554/oogway/index.m3u8` (or wall PC IP if remote)
+   - `NTFY_TOPIC` → your ntfy topic
+   - `TZ` → your timezone (e.g., `America/New_York`)
+   - `ACTIVITY_LOG_PATH` → `/app/activity_log.json` (leave as default)
+3. Deploy the stack
+
+#### With Docker CLI
+
 ```bash
 cp .env.example .env
+# Edit .env with your values
+docker compose up --build
 ```
 
 Edit `.env` with your values:
@@ -48,11 +62,7 @@ ACTIVITY_LOG_PATH=/app/activity_log.json
 
 **Note**: If running OogWorld on a different machine from MediaMTX, replace `localhost` with the IP/hostname of your wall PC.
 
-### 2. Start with Docker
-
-```bash
-docker compose up --build
-```
+### 2. Start Deployment
 
 The app will be available at `http://localhost:4120`.
 
