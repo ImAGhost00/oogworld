@@ -455,7 +455,6 @@
         </div>
         <div class="flex items-center gap-2">
           <button id="admin-btn" class="v-btn">Admin</button>
-          <span id="username-badge" class="name-badge"></span>
         </div>
       </header>
 
@@ -464,14 +463,7 @@
           <div class="k">Channel</div>
           <div class="v">Oogway Habitat Live</div>
         </div>
-        <div class="platform-stat">
-          <div class="k">Status</div>
-          <div class="v">Streaming Now</div>
-        </div>
-        <div class="platform-stat">
-          <div class="k">Mood</div>
-          <div class="v">Nature Calm</div>
-        </div>
+
       </div>
 
       <div id="daylight-banner" class="daylight-banner"></div>
@@ -494,13 +486,15 @@
           <div class="video-controls">
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
             <button id="video-popout-btn" class="v-btn">Open Player</button>
-            <span class="ml-auto text-xs text-slate-400">Tunnel-safe stream routing enabled</span>
           </div>
         </article>
 
         <aside class="panel flex h-[68vh] min-h-[420px] flex-col overflow-hidden rounded-xl md:col-span-2">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <div class="text-sm font-semibold text-slate-100">Live Chat</div>
+            <div class="flex items-center gap-2">
+              <div class="text-sm font-semibold text-slate-100">Live Chat</div>
+              <span id="username-badge" class="name-badge"></span>
+            </div>
             <button id="chat-settings-btn" class="cog-btn" title="Chat settings">&#9881;</button>
           </div>
 
