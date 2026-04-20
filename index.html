@@ -95,15 +95,14 @@
     }
 
     .report-banner {
-      position: fixed;
-      top: 10px;
-      left: 50%;
-      transform: translate(-50%, -8px);
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
       z-index: 65;
-      width: min(94vw, 780px);
+      width: min(94vw, 420px);
       border: 1px solid rgba(239, 68, 68, 0.55);
       border-radius: 10px;
-      background: linear-gradient(135deg, rgba(127, 29, 29, 0.94), rgba(69, 10, 10, 0.92));
+      background: linear-gradient(135deg, rgba(127, 29, 29, 0.97), rgba(69, 10, 10, 0.95));
       box-shadow: 0 14px 34px rgba(127, 29, 29, 0.35);
       padding: 10px 14px;
       font-size: 13px;
@@ -111,11 +110,12 @@
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.28s ease, transform 0.28s ease;
+      transform: translateY(-4px);
     }
 
     .report-banner.show {
       opacity: 1;
-      transform: translate(-50%, 0);
+      transform: translateY(0);
       pointer-events: auto;
     }
 
@@ -431,7 +431,7 @@
 </head>
 <body class="min-h-screen">
   <div id="night-sky" class="night-sky"><div class="moon"></div></div>
-  <div id="report-banner" class="report-banner"></div>
+
 
   <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85">
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
@@ -463,9 +463,12 @@
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
             <div class="text-sm text-slate-100">Now Streaming: Oogway Cam</div>
             <div class="flex items-center gap-2">
-              <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
-                <img src="/images/red-triangle-warning-icon.svg" alt="Report issue" />
-              </button>
+              <div class="relative">
+                <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
+                  <img src="/images/red-triangle-warning-icon.svg" alt="Report issue" />
+                </button>
+                <div id="report-banner" class="report-banner"></div>
+              </div>
               <span class="live-chip"><span class="live-pulse"></span> LIVE</span>
               <button id="video-settings-btn" class="cog-btn" title="Video settings">&#9881;</button>
             </div>
