@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -36,12 +37,17 @@ def derive_stream_urls(base: str) -> dict[str, str]:
 
     webrtc = swap_port(8889) + "/"
     hls = swap_port(8888) + "/index.m3u8"
-    llhls = swap_port(8888) + "/index.m3u8?_HLS_skip=YES"
     rtsp = f"rtsp://{host_only}:8554{path}"
-    return {"webrtc": webrtc, "hls": hls, "llhls": llhls, "rtsp": rtsp}
+    return {"webrtc": webrtc, "hls": hls, "rtsp": rtsp}
 
 
 STREAM_URLS = derive_stream_urls(STREAM_URL)
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
+CHAT_HISTORY: deque[dict[str, str]] = deque(maxlen=50)
+CHAT_CLIENTS: set[WebSocket] = set()
 
 ACTION_MESSAGE: dict[str, str] = {
     "Request Food": "OogWorld request: Please feed Oogway.",
@@ -124,6 +130,40 @@ def health() -> dict[str, Any]:
         "ntfyConfigured": "yes" if NTFY_TOPIC else "no",
         "streams": STREAM_URLS,
     }
+
+
+@app.websocket("/ws/chat")
+async def chat_ws(ws: WebSocket, username: str = "") -> None:
+    safe_name = (username.strip()[:24] or "Anonymous").replace("<", "").replace(">", "")
+    await ws.accept()
+    CHAT_CLIENTS.add(ws)
+    # Deliver history to the new joiner
+    for msg in list(CHAT_HISTORY):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            break
+    try:
+        while True:
+            raw = await ws.receive_text()
+            text = raw.strip()[:200]
+            if not text:
+                continue
+            msg: dict[str, str] = {
+                "username": safe_name,
+                "text": text,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            CHAT_HISTORY.append(msg)
+            dead: set[WebSocket] = set()
+            for client in list(CHAT_CLIENTS):
+                try:
+                    await client.send_json(msg)
+                except Exception:
+                    dead.add(client)
+            CHAT_CLIENTS -= dead
+    except WebSocketDisconnect:
+        CHAT_CLIENTS.discard(ws)
 
 
 @app.get("/api/activity")

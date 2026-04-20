@@ -25,201 +25,439 @@
     }
 
     .card {
-      background: linear-gradient(145deg, rgba(45, 59, 66, 0.92), rgba(25, 34, 39, 0.92));
-      border: 1px solid rgba(57, 255, 20, 0.18);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 18px 40px rgba(0, 0, 0, 0.35);
+      background: linear-gradient(145deg, rgba(45,59,66,0.92), rgba(25,34,39,0.92));
+      border: 1px solid rgba(57,255,20,0.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 18px 40px rgba(0,0,0,0.35);
     }
 
     .live-dot {
-      width: 10px;
-      height: 10px;
+      width: 10px; height: 10px;
       border-radius: 50%;
       background: var(--accent);
-      box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.8);
+      box-shadow: 0 0 0 0 rgba(57,255,20,0.8);
       animation: pulse 1.6s infinite;
     }
 
     @keyframes pulse {
-      0% { box-shadow: 0 0 0 0 rgba(57, 255, 20, 0.8); }
-      100% { box-shadow: 0 0 0 14px rgba(57, 255, 20, 0); }
+      0%   { box-shadow: 0 0 0 0   rgba(57,255,20,0.8); }
+      100% { box-shadow: 0 0 0 14px rgba(57,255,20,0);   }
     }
 
     .action-btn {
       transition: transform 0.14s ease, filter 0.14s ease;
     }
-
     .action-btn:active {
       transform: translateY(1px) scale(0.99);
       filter: brightness(0.95);
     }
+
+    /* Custom video player */
+    #video-wrapper { position: relative; background: #000; }
+    #video-wrapper video { display: block; width: 100%; }
+    #vid-controls {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.82));
+      padding: 28px 12px 8px;
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    /* Chat */
+    #chat-messages { scrollbar-width: thin; scrollbar-color: #39ff1440 transparent; }
+    #chat-messages::-webkit-scrollbar { width: 4px; }
+    #chat-messages::-webkit-scrollbar-thumb { background: #39ff1440; border-radius: 9px; }
+
+    /* Sidebar tabs */
+    .sidebar-tab { transition: color 0.12s, border-color 0.12s; }
+    .sidebar-tab.active { color: #a3e635; border-bottom: 2px solid #a3e635; }
+    .sidebar-tab:not(.active) { color: #6b7280; border-bottom: 2px solid transparent; }
   </style>
 </head>
 <body class="min-h-screen">
-  <main class="mx-auto max-w-6xl px-4 pb-24 pt-6 md:pb-8 md:pt-10">
-    <header class="mb-5 flex items-center justify-between">
-      <div>
-        <p class="text-sm uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
-        <h1 class="text-2xl font-bold md:text-4xl">OogWorld Command Deck</h1>
-      </div>
-      <div class="card rounded-full px-3 py-2 text-xs md:text-sm">
-        <div class="flex items-center gap-2">
-          <span class="live-dot"></span>
-          <span>Live</span>
-        </div>
-      </div>
-    </header>
 
-    <section class="grid gap-4 md:grid-cols-5">
-      <article class="card overflow-hidden rounded-2xl md:col-span-3">
-        <div class="flex items-center justify-between border-b border-lime-300/20 px-4 py-2">
-          <span class="text-sm text-lime-200/80">Terrarium Stream</span>
-          <div id="stream-tabs" class="flex gap-1 text-xs">
-            <button data-type="webrtc" class="stream-tab rounded px-2 py-1 font-semibold">WebRTC</button>
-            <button data-type="hls" class="stream-tab rounded px-2 py-1 font-semibold">HLS</button>
-            <button data-type="llhls" class="stream-tab rounded px-2 py-1 font-semibold">LL-HLS</button>
+  <!-- LOGIN OVERLAY -->
+  <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div class="card w-full max-w-sm rounded-2xl p-8 text-center">
+      <p class="mb-1 text-xs uppercase tracking-widest text-lime-400/80">GhostWorld</p>
+      <h1 class="mb-1 text-3xl font-bold">OogWorld</h1>
+      <p class="mb-6 text-sm text-slate-400">Enter a display name to join the stream</p>
+      <input
+        id="username-input"
+        type="text"
+        maxlength="24"
+        placeholder="Your name..."
+        autocomplete="off"
+        class="mb-4 w-full rounded-xl border border-lime-500/30 bg-black/40 px-4 py-3 text-center text-lg outline-none focus:border-lime-400 focus:ring-2 focus:ring-lime-400/20"
+      />
+      <button
+        id="login-btn"
+        class="action-btn w-full rounded-xl bg-lime-500 py-3 text-lg font-bold text-black shadow-lg shadow-lime-500/30"
+      >Enter</button>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="app" class="hidden">
+    <main class="mx-auto max-w-6xl px-4 pb-28 pt-6 md:pb-10 md:pt-10">
+
+      <header class="mb-5 flex items-center justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
+          <h1 class="text-2xl font-bold md:text-4xl">OogWorld Command Deck</h1>
+        </div>
+        <div class="flex items-center gap-3">
+          <span id="username-badge" class="card rounded-full px-3 py-1.5 text-xs text-lime-300/80"></span>
+          <div class="card rounded-full px-3 py-2 text-xs md:text-sm">
+            <div class="flex items-center gap-2">
+              <span class="live-dot"></span>
+              <span>Live</span>
+            </div>
           </div>
         </div>
-        <div id="stream-webrtc" class="stream-panel hidden">
-          <iframe id="webrtc-frame" src="" allow="autoplay; camera; microphone" class="h-[260px] w-full bg-black md:h-[440px]" style="border:0"></iframe>
-        </div>
-        <div id="stream-hls" class="stream-panel hidden">
-          <video id="hls-video" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
-        </div>
-        <div id="stream-llhls" class="stream-panel hidden">
-          <video id="llhls-video" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
-        </div>
-      </article>
+      </header>
 
-      <aside class="card rounded-2xl p-4 md:col-span-2">
-        <h2 class="mb-3 text-lg font-semibold">Recent Activity</h2>
-        <ul id="activity-list" class="space-y-2 text-sm text-slate-200">
-          <li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>
-        </ul>
-      </aside>
-    </section>
-  </main>
+      <section class="grid gap-4 md:grid-cols-5">
 
-  <div class="fixed bottom-0 left-0 right-0 border-t border-lime-400/20 bg-black/80 p-3 backdrop-blur md:static md:border-none md:bg-transparent md:p-0">
-    <div class="mx-auto grid max-w-6xl grid-cols-2 gap-3 px-4 md:-mt-16 md:max-w-sm md:px-0">
-      <button id="food-btn" class="action-btn rounded-xl bg-lime-500 px-4 py-4 text-lg font-bold text-black shadow-lg shadow-lime-500/30">Request Food</button>
-      <button id="water-btn" class="action-btn rounded-xl bg-emerald-500 px-4 py-4 text-lg font-bold text-black shadow-lg shadow-emerald-500/30">Refill Water</button>
+        <!-- Stream card -->
+        <article class="card overflow-hidden rounded-2xl md:col-span-3">
+          <div class="flex items-center justify-between border-b border-lime-300/20 px-4 py-2">
+            <span class="text-sm text-lime-200/80">Terrarium Stream</span>
+            <div id="stream-tabs" class="flex gap-1 text-xs">
+              <button data-type="webrtc" class="stream-tab rounded px-2 py-1 font-semibold">WebRTC</button>
+              <button data-type="hls"    class="stream-tab rounded px-2 py-1 font-semibold">HLS</button>
+            </div>
+          </div>
+
+          <!-- WebRTC panel -->
+          <div id="stream-webrtc" class="stream-panel hidden">
+            <iframe
+              id="webrtc-frame"
+              src=""
+              allow="autoplay"
+              class="h-[260px] w-full bg-black md:h-[440px]"
+              style="border:0"
+            ></iframe>
+          </div>
+
+          <!-- HLS panel with custom controls -->
+          <div id="stream-hls" class="stream-panel hidden">
+            <div id="video-wrapper">
+              <video id="hls-video" autoplay muted playsinline class="h-[260px] md:h-[440px]"></video>
+              <div id="vid-controls">
+                <button id="vid-playpause" title="Play/Pause" class="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 text-base leading-none">
+                  &#9208;
+                </button>
+                <div class="relative flex-1 h-1 rounded bg-white/20 overflow-hidden">
+                  <div id="vid-progress" class="h-full bg-lime-400 transition-none" style="width:100%"></div>
+                </div>
+                <button id="vid-mute" title="Mute/Unmute" class="text-white text-sm w-8 text-center hover:text-lime-300">&#128266;</button>
+                <button id="vid-live" title="Jump to live" class="rounded px-2 py-0.5 text-xs font-bold bg-red-600 text-white">&#9679; LIVE</button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Right sidebar -->
+        <aside class="card flex flex-col rounded-2xl md:col-span-2" style="height:340px">
+
+          <div class="flex border-b border-lime-300/20 px-4 pt-1 shrink-0">
+            <button data-panel="activity" class="sidebar-tab mr-4 pb-2 text-sm font-semibold active">Activity</button>
+            <button data-panel="chat"     class="sidebar-tab pb-2 text-sm font-semibold">Chat</button>
+          </div>
+
+          <div id="panel-activity" class="flex-1 overflow-y-auto p-3">
+            <ul id="activity-list" class="space-y-2 text-sm text-slate-200">
+              <li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>
+            </ul>
+          </div>
+
+          <div id="panel-chat" class="hidden flex-col flex-1 min-h-0">
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-3 space-y-1 text-sm"></div>
+            <div class="flex gap-2 border-t border-lime-300/10 p-2 shrink-0">
+              <input
+                id="chat-input"
+                type="text"
+                maxlength="200"
+                placeholder="Say something..."
+                autocomplete="off"
+                class="flex-1 rounded-lg border border-lime-500/20 bg-black/40 px-3 py-2 text-sm outline-none focus:border-lime-400"
+              />
+              <button id="chat-send" class="action-btn rounded-lg bg-lime-500 px-3 py-2 text-sm font-bold text-black">&#8629;</button>
+            </div>
+          </div>
+
+        </aside>
+      </section>
+    </main>
+
+    <!-- Action buttons (fixed bottom) -->
+    <div class="fixed bottom-0 left-0 right-0 border-t border-lime-400/20 bg-black/80 p-3 backdrop-blur">
+      <div class="mx-auto grid max-w-6xl grid-cols-2 gap-3 px-4 md:max-w-sm">
+        <button id="food-btn"  class="action-btn rounded-xl bg-lime-500  px-4 py-4 text-lg font-bold text-black shadow-lg shadow-lime-500/30">Request Food</button>
+        <button id="water-btn" class="action-btn rounded-xl bg-emerald-500 px-4 py-4 text-lg font-bold text-black shadow-lg shadow-emerald-500/30">Refill Water</button>
+      </div>
     </div>
   </div>
 
   <script>
-    const activityList = document.getElementById("activity-list");
-    const foodBtn = document.getElementById("food-btn");
-    const waterBtn = document.getElementById("water-btn");
-    let hlsInstances = {};
+  (function () {
+    "use strict";
 
+    function escHtml(s) {
+      return String(s)
+        .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    // -- Login ----------------------------------------------------------------
+    var username = sessionStorage.getItem("oogworld_username") || "";
+
+    function enterApp(name) {
+      username = (name.trim().replace(/</g,"").replace(/>/g,"") || "Anonymous").slice(0,24);
+      sessionStorage.setItem("oogworld_username", username);
+      document.getElementById("username-badge").textContent = username;
+      document.getElementById("login-overlay").classList.add("hidden");
+      document.getElementById("app").classList.remove("hidden");
+      initApp();
+    }
+
+    if (username) {
+      enterApp(username);
+    } else {
+      var loginBtn   = document.getElementById("login-btn");
+      var usernameIn = document.getElementById("username-input");
+      loginBtn.addEventListener("click", function () {
+        var v = usernameIn.value.trim();
+        if (v) enterApp(v);
+      });
+      usernameIn.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") loginBtn.click();
+      });
+    }
+
+    // -- API ------------------------------------------------------------------
     async function loadHealth() {
-      const res = await fetch("/api/health");
-      if (!res.ok) return null;
-      return res.json();
+      try { var r = await fetch("/api/health"); return r.ok ? r.json() : null; }
+      catch(e) { return null; }
     }
 
     async function loadActivity() {
-      const res = await fetch("/api/activity");
-      if (!res.ok) return;
-      const data = await res.json();
-      renderActivity(data.items || []);
+      try {
+        var r    = await fetch("/api/activity");
+        var data = await r.json();
+        renderActivity(data.items || []);
+      } catch(e) {}
     }
 
     function renderActivity(items) {
+      var list = document.getElementById("activity-list");
       if (!items.length) {
-        activityList.innerHTML = '<li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>';
+        list.innerHTML = '<li class="rounded-lg bg-black/25 p-2 text-slate-300">No activity yet.</li>';
         return;
       }
-
-      activityList.innerHTML = items
-        .slice()
-        .reverse()
-        .map((item) => {
-          const stamp = new Date(item.timestamp).toLocaleString();
-          const tone = item.delivery === "sent" ? "text-lime-300" : "text-rose-300";
-          return `<li class="rounded-lg bg-black/25 p-2">
-              <div class="font-semibold">${item.action}</div>
-              <div class="${tone}">${item.delivery.toUpperCase()}</div>
-              <div class="text-xs text-slate-400">${stamp}</div>
-            </li>`;
-        })
-        .join("");
+      list.innerHTML = items.slice().reverse().map(function (item) {
+        var stamp = new Date(item.timestamp).toLocaleString();
+        var tone  = item.delivery === "sent" ? "text-lime-300" : "text-rose-300";
+        return '<li class="rounded-lg bg-black/25 p-2">' +
+          '<div class="font-semibold">' + escHtml(item.action) + '</div>' +
+          '<div class="' + tone + '">' + escHtml(item.delivery).toUpperCase() + '</div>' +
+          '<div class="text-xs text-slate-400">' + escHtml(stamp) + '</div></li>';
+      }).join("");
     }
 
     async function postAction(action) {
-      const res = await fetch("/api/actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action })
+      try {
+        var r = await fetch("/api/actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action })
+        });
+        if (!r.ok) {
+          var body = await r.json().catch(function () { return { detail: "Request failed" }; });
+          alert(body.detail || "Action failed");
+        }
+      } catch(e) { alert("Network error"); }
+      loadActivity();
+    }
+
+    // -- Sidebar tabs ---------------------------------------------------------
+    function showSidebarPanel(name) {
+      document.querySelectorAll(".sidebar-tab").forEach(function (btn) {
+        btn.classList.toggle("active", btn.dataset.panel === name);
       });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: "Request failed" }));
-        alert(body.detail || "Action failed");
-      }
-
-      await loadActivity();
-    }
-
-    const TAB_ACTIVE = "bg-lime-500 text-black";
-    const TAB_IDLE = "text-slate-400 hover:text-slate-100";
-    let streamUrls = {};
-
-    function initHlsVideo(videoEl, url, lowLatency = false) {
-      const key = videoEl.id;
-      if (hlsInstances[key]) { hlsInstances[key].destroy(); }
-      if (!url) return;
-      if (window.Hls && Hls.isSupported()) {
-        const hls = new Hls({ enableWorker: true, lowLatencyMode: lowLatency });
-        hls.loadSource(url);
-        hls.attachMedia(videoEl);
-        hlsInstances[key] = hls;
+      document.getElementById("panel-activity").classList.toggle("hidden", name !== "activity");
+      var chatPanel = document.getElementById("panel-chat");
+      if (name === "chat") {
+        chatPanel.classList.remove("hidden");
+        chatPanel.classList.add("flex");
       } else {
-        videoEl.src = url;
+        chatPanel.classList.add("hidden");
+        chatPanel.classList.remove("flex");
       }
     }
+
+    document.querySelectorAll(".sidebar-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () { showSidebarPanel(btn.dataset.panel); });
+    });
+
+    // -- Chat WebSocket --------------------------------------------------------
+    var ws = null;
+
+    function connectChat() {
+      var proto = location.protocol === "https:" ? "wss" : "ws";
+      ws = new WebSocket(proto + "://" + location.host + "/ws/chat?username=" + encodeURIComponent(username));
+      ws.onmessage = function (e) {
+        try { appendChatMsg(JSON.parse(e.data)); } catch(err) {}
+      };
+      ws.onclose = function () { setTimeout(connectChat, 2500); };
+    }
+
+    function appendChatMsg(msg) {
+      var box = document.getElementById("chat-messages");
+      var div = document.createElement("div");
+      div.className = "leading-snug";
+      var ts = msg.ts ? '<span class="text-slate-500 text-[10px] ml-1">' + new Date(msg.ts).toLocaleTimeString() + '</span>' : "";
+      div.innerHTML = '<span class="font-semibold text-lime-300">' + escHtml(msg.username) + '</span>: ' + escHtml(msg.text) + ts;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function sendChat() {
+      var inp  = document.getElementById("chat-input");
+      var text = inp.value.trim();
+      if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(text);
+      inp.value = "";
+    }
+
+    document.getElementById("chat-send").addEventListener("click", sendChat);
+    document.getElementById("chat-input").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") sendChat();
+    });
+
+    // -- Stream type switcher -------------------------------------------------
+    var TAB_ACTIVE  = "bg-lime-500 text-black";
+    var TAB_IDLE    = "text-slate-400 hover:text-slate-100";
+    var streamUrls  = {};
+    var hlsInstance = null;
 
     function showStreamType(type) {
-      document.querySelectorAll(".stream-panel").forEach(el => el.classList.add("hidden"));
-      document.querySelectorAll(".stream-tab").forEach(btn => {
+      document.querySelectorAll(".stream-panel").forEach(function (el) { el.classList.add("hidden"); });
+      document.querySelectorAll(".stream-tab").forEach(function (btn) {
         btn.className = "stream-tab rounded px-2 py-1 font-semibold " +
           (btn.dataset.type === type ? TAB_ACTIVE : TAB_IDLE);
       });
-      const panel = document.getElementById("stream-" + type);
+      var panel = document.getElementById("stream-" + type);
       if (panel) panel.classList.remove("hidden");
 
       if (type === "webrtc" && streamUrls.webrtc) {
-        const frame = document.getElementById("webrtc-frame");
-        if (!frame.src || frame.src !== streamUrls.webrtc) frame.src = streamUrls.webrtc;
+        var frame = document.getElementById("webrtc-frame");
+        if (frame.src !== streamUrls.webrtc) frame.src = streamUrls.webrtc;
       } else if (type === "hls" && streamUrls.hls) {
-        initHlsVideo(document.getElementById("hls-video"), streamUrls.hls, false);
-      } else if (type === "llhls" && streamUrls.llhls) {
-        initHlsVideo(document.getElementById("llhls-video"), streamUrls.llhls, true);
+        initHlsPlayer(streamUrls.hls);
       }
 
       localStorage.setItem("streamType", type);
     }
 
-    document.querySelectorAll(".stream-tab").forEach(btn => {
-      btn.addEventListener("click", () => showStreamType(btn.dataset.type));
+    document.querySelectorAll(".stream-tab").forEach(function (btn) {
+      btn.addEventListener("click", function () { showStreamType(btn.dataset.type); });
     });
 
-    foodBtn.addEventListener("click", () => postAction("Request Food"));
-    waterBtn.addEventListener("click", () => postAction("Refill Water"));
+    // -- HLS custom video controls --------------------------------------------
+    var videoEl      = document.getElementById("hls-video");
+    var btnPlayPause = document.getElementById("vid-playpause");
+    var btnMute      = document.getElementById("vid-mute");
+    var btnLive      = document.getElementById("vid-live");
+    var progressBar  = document.getElementById("vid-progress");
 
-    (async () => {
-      const health = await loadHealth();
+    function initHlsPlayer(url) {
+      if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+      if (!url) return;
+      if (window.Hls && Hls.isSupported()) {
+        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: false });
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(videoEl);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
+          videoEl.play().catch(function(){});
+        });
+      } else {
+        videoEl.src = url;
+        videoEl.play().catch(function(){});
+      }
+    }
+
+    function isAtLiveEdge() {
+      if (!videoEl.duration || !isFinite(videoEl.duration)) return true;
+      return (videoEl.duration - videoEl.currentTime) < 8;
+    }
+
+    function updateLiveBtn() {
+      var atEdge = isAtLiveEdge() && !videoEl.paused;
+      btnLive.className = "rounded px-2 py-0.5 text-xs font-bold transition-colors " +
+        (atEdge ? "bg-red-600 text-white" : "bg-white/20 text-slate-300");
+    }
+
+    function updatePlayPauseBtn() {
+      btnPlayPause.innerHTML = videoEl.paused ? "&#9654;" : "&#9208;";
+    }
+
+    function updateMuteBtn() {
+      btnMute.innerHTML = videoEl.muted ? "&#128263;" : "&#128266;";
+    }
+
+    function jumpToLive() {
+      if (hlsInstance && hlsInstance.liveSyncPosition) {
+        videoEl.currentTime = hlsInstance.liveSyncPosition;
+      } else if (isFinite(videoEl.duration)) {
+        videoEl.currentTime = videoEl.duration - 1;
+      }
+      videoEl.play().catch(function(){});
+    }
+
+    function updateProgress() {
+      if (!videoEl.duration || !isFinite(videoEl.duration)) {
+        progressBar.style.width = "100%";
+        return;
+      }
+      progressBar.style.width = Math.min(100, (videoEl.currentTime / videoEl.duration) * 100) + "%";
+    }
+
+    btnPlayPause.addEventListener("click", function () {
+      if (videoEl.paused) { jumpToLive(); } else { videoEl.pause(); }
+    });
+
+    btnMute.addEventListener("click", function () {
+      videoEl.muted = !videoEl.muted;
+      updateMuteBtn();
+    });
+
+    btnLive.addEventListener("click", jumpToLive);
+
+    videoEl.addEventListener("play",       function () { updatePlayPauseBtn(); updateLiveBtn(); });
+    videoEl.addEventListener("pause",      function () { updatePlayPauseBtn(); updateLiveBtn(); });
+    videoEl.addEventListener("timeupdate", function () { updateProgress(); updateLiveBtn(); });
+    setInterval(updateLiveBtn, 2000);
+
+    // -- Action buttons -------------------------------------------------------
+    document.getElementById("food-btn").addEventListener("click",  function () { postAction("Request Food"); });
+    document.getElementById("water-btn").addEventListener("click", function () { postAction("Refill Water"); });
+
+    // -- Bootstrap ------------------------------------------------------------
+    async function initApp() {
+      var health = await loadHealth();
       if (health && health.streams) {
         streamUrls = health.streams;
-        const saved = localStorage.getItem("streamType") || "webrtc";
+        var saved = localStorage.getItem("streamType") || "webrtc";
         showStreamType(saved);
       } else {
-        // No streams configured — hide tab bar
         document.getElementById("stream-tabs").classList.add("hidden");
       }
       await loadActivity();
       setInterval(loadActivity, 15000);
-    })();
+      connectChat();
+    }
+
+  }());
   </script>
 </body>
 </html>
