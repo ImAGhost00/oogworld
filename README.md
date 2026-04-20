@@ -164,7 +164,7 @@ The application is designed with extension points for:
 
 ## Version
 
-- Current: 0.1.1
+- Current: 0.1.2
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog

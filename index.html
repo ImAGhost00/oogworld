@@ -660,7 +660,7 @@
       }
 
       function setWebRtcSource(forceReload) {
-        var src = state.streams.webrtc || "";
+        var src = state.streams.webrtcDirect || state.streams.webrtc || "";
         if (!src) return;
 
         if (!videoPrefs.autoplay) {
@@ -1037,7 +1037,7 @@
         applyBadge();
 
         var health = await loadHealth();
-        if (!health || !health.streams || !health.streams.webrtc) {
+        if (!health || !health.streams || (!health.streams.webrtc && !health.streams.webrtcDirect)) {
           alert("WebRTC stream not configured. Check STREAM_URL.");
           return;
         }

@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.2] - 2026-04-20
+- Fixed embedded stream `Stream not found` issue by preferring `webrtcDirect` URL for the in-page iframe player (same working path as `Open Player`).
+- Kept `/media/webrtc/...` as fallback path for compatibility.
+- Updated backend app version to `0.1.2` and synchronized README version.
+
 ## [0.1.1] - 2026-04-20
 - Fixed stream proxy `405 Method Not Allowed` issue by allowing `/media/...` routes to accept WebRTC signaling methods (`POST`, `PATCH`, `DELETE`, `OPTIONS`, plus `GET`/`HEAD`).
 - Updated proxy forwarding to pass through incoming HTTP method, request body, and signaling-relevant headers instead of forcing `GET`.
