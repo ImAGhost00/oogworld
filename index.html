@@ -554,7 +554,7 @@
         <span>Enabled</span>
       </label>
 
-      <p class="mb-4 text-xs text-slate-400">HLS low-latency mode via proxy.</p>
+      <p class="mb-4 text-xs text-slate-400">HLS stability mode via proxy.</p>
 
       <button id="video-settings-save" class="w-full rounded-lg bg-[#4caf50] py-2 text-sm font-bold text-[#0a1f0c]">Save</button>
     </div>
@@ -829,17 +829,46 @@
         var video = el.hlsVideo;
         if (Hls.isSupported()) {
           var hls = new Hls({
-            lowLatencyMode: true,
-            liveSyncDurationCount: 1,
-            liveMaxLatencyDurationCount: 3,
-            maxLiveSyncPlaybackRate: 1.5,
-            backBufferLength: 4,
+            lowLatencyMode: false,
+            liveSyncDurationCount: 3,
+            liveMaxLatencyDurationCount: 6,
+            maxLiveSyncPlaybackRate: 1.05,
+            maxBufferLength: 10,
+            backBufferLength: 20,
           });
           _hlsInstance = hls;
           hls.loadSource(src);
           hls.attachMedia(video);
+
+          hls.on(Hls.Events.ERROR, function (_evt, data) {
+            if (!data || !data.fatal) return;
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+              return;
+            }
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+              return;
+            }
+            hls.destroy();
+            _hlsInstance = null;
+            setTimeout(function () {
+              setWebRtcSource(true);
+            }, 2000);
+          });
+
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
             if (videoPrefs.autoplay) video.play().catch(function () {});
+          });
+
+          hls.on(Hls.Events.LEVEL_UPDATED, function (_evt, data) {
+            if (!data || !data.details || !data.details.live) return;
+            var edge = data.details.edge;
+            if (typeof edge !== "number") return;
+            var drift = edge - video.currentTime;
+            if (drift > 8) {
+              video.currentTime = Math.max(0, edge - 3);
+            }
           });
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;

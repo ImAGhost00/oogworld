@@ -4,16 +4,16 @@ logDestinations: [stdout]
 api: true
 rtsp: true
 hls: true
-webrtc: true
+webrtc: false
 
 # Changed from "optional" (string) to false (bool) to satisfy the Go parser
 webrtcEncryption: false
 webrtcAllowOrigin: "*"
 
 hlsAlwaysRemux: true
-hlsVariant: lowLatency
-hlsSegmentCount: 3
-hlsSegmentDuration: 0.5s
+hlsVariant: mpegts
+hlsSegmentCount: 6
+hlsSegmentDuration: 1s
 hlsAllowOrigin: "*"
 
 paths:
