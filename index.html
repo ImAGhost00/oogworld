@@ -815,7 +815,7 @@
       }
 
       function setWebRtcSource(forceReload) {
-        var src = state.streams.webrtcDirect || state.streams.webrtc || "";
+        var src = state.streams.webrtc || state.streams.webrtcDirect || "";
         if (!src) return;
 
         if (!videoPrefs.autoplay) {
@@ -1173,7 +1173,7 @@
       }
 
       function openPlayerTab() {
-        var url = state.streams.webrtcDirect || state.streams.webrtc || "";
+        var url = state.streams.webrtc || state.streams.webrtcDirect || "";
         if (!url) return;
         window.open(url, "_blank", "noopener,noreferrer");
       }
