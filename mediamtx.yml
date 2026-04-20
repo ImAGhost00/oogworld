@@ -12,6 +12,8 @@ webrtcAllowOrigin: "*"
 
 hlsAlwaysRemux: true
 hlsVariant: lowLatency
+hlsSegmentCount: 3
+hlsSegmentDuration: 0.5s
 hlsAllowOrigin: "*"
 
 paths:

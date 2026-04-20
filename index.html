@@ -828,7 +828,13 @@
 
         var video = el.hlsVideo;
         if (Hls.isSupported()) {
-          var hls = new Hls({ lowLatencyMode: true });
+          var hls = new Hls({
+            lowLatencyMode: true,
+            liveSyncDurationCount: 1,
+            liveMaxLatencyDurationCount: 3,
+            maxLiveSyncPlaybackRate: 1.5,
+            backBufferLength: 4,
+          });
           _hlsInstance = hls;
           hls.loadSource(src);
           hls.attachMedia(video);
