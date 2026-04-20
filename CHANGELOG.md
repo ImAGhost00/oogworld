@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.0] - 2026-04-20
+- Reworked emergency reporting UX: replaced chat-area emergency button with a report icon near the video header using the new warning icon asset.
+- Added compact report modal with `Need Food` and `Need Water` options.
+- Added report locking behavior: once submitted, report stays locked until admin reset.
+- Added red emergency banner text pattern `USER has reported that Oogway needs XXX` with live elapsed timer since report timestamp.
+- Added password-protected admin panel flow backed by `ADMIN_PASSWORD` environment variable.
+- Added admin authentication endpoint (`POST /api/admin/login`) issuing short-lived admin tokens.
+- Added admin moderation endpoints:
+	- `POST /api/admin/reports/reset` (reset food/water/all report locks)
+	- `DELETE /api/admin/chat/{message_id}` (delete single chat message)
+	- `POST /api/admin/chat/clear` (clear chat log)
+- Added static file hosting for `/images` so UI icon assets are served directly by FastAPI.
+- Added sunrise/sunset scheduling integration using `https://sunrise-sunset.org/api`.
+- Added new daylight endpoint (`GET /api/daylight`) with cached periodic refresh to represent heatlamp on/off state.
+- Added bedtime UI banners:
+	- Countdown banner near sunset.
+	- Overnight banner text: `oogway is asleep, his heatlamp will turn on in XX:XX`.
+- Added new environment variables: `ADMIN_PASSWORD`, `SUN_LAT`, `SUN_LNG`, and `BEDTIME_SOON_MINUTES`.
+- Updated backend app version to `0.1.0` and synchronized README version/docs.
+
 ## [0.0.8] - 2026-04-20
 - Rearchitected for split deployment: MediaMTX runs natively on Windows machine (captures C922 via DShow), OogWorld backend runs on server (connects via network RTSP/WebRTC).
 - Updated `mediamtx.yml` to use libx264 ultrafast (stable encoder for older Intel iGPU).

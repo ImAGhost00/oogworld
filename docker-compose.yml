@@ -8,6 +8,10 @@ services:
       STREAM_URL: ${STREAM_URL:-http://localhost:8889/oogway}
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
       TZ: ${TZ:-UTC}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SUN_LAT: ${SUN_LAT:-40.7128}
+      SUN_LNG: ${SUN_LNG:--74.0060}
+      BEDTIME_SOON_MINUTES: ${BEDTIME_SOON_MINUTES:-90}
       ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/activity_log.json}
       CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/chat_log.json}
     ports:

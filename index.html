@@ -178,34 +178,66 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
-    .report-toggle-btn {
-      width: 100%;
+    .daylight-banner {
+      border: 1px solid #2a2a2a;
       border-radius: 10px;
-      border: 1px solid rgba(248, 113, 113, 0.55);
-      background: linear-gradient(135deg, rgba(220, 38, 38, 0.88), rgba(153, 27, 27, 0.88));
-      color: #fff;
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      padding: 10px 12px;
-      text-transform: uppercase;
-      font-size: 12px;
+      padding: 9px 12px;
+      font-size: 13px;
+      color: #e5e7eb;
+      background: linear-gradient(140deg, rgba(30, 41, 59, 0.35), rgba(8, 12, 20, 0.6));
+      margin-bottom: 10px;
+      display: none;
     }
 
-    .report-panel {
-      margin-top: 8px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      opacity: 1;
-      max-height: 120px;
-      transition: opacity 0.2s ease, max-height 0.24s ease;
+    .daylight-banner.show {
+      display: block;
     }
 
-    .report-panel.hidden {
-      opacity: 0;
-      max-height: 0;
-      overflow: hidden;
-      pointer-events: none;
+    .report-icon-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      border: 1px solid rgba(248, 113, 113, 0.48);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(127, 29, 29, 0.25);
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }
+
+    .report-icon-btn img {
+      width: 16px;
+      height: 16px;
+      opacity: 0.92;
+    }
+
+    .report-icon-btn:hover {
+      transform: translateY(-1px);
+      background: rgba(185, 28, 28, 0.35);
+      border-color: rgba(248, 113, 113, 0.8);
+    }
+
+    .report-icon-btn.locked {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .report-mini-modal {
+      position: fixed;
+      right: 14px;
+      top: 84px;
+      z-index: 68;
+      width: min(92vw, 320px);
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      border-radius: 12px;
+      background: linear-gradient(150deg, #1b0b0b, #0d0707);
+      box-shadow: 0 14px 34px rgba(127, 29, 29, 0.35);
+      padding: 12px;
+      display: none;
+    }
+
+    .report-mini-modal.show {
+      display: block;
     }
 
     .report-btn {
@@ -235,6 +267,28 @@
       font-size: 11px;
       color: #fecaca;
       background: rgba(127, 29, 29, 0.22);
+    }
+
+    .admin-delete-btn {
+      margin-left: 6px;
+      border-radius: 999px;
+      border: 1px solid rgba(248, 113, 113, 0.5);
+      background: rgba(127, 29, 29, 0.25);
+      color: #fecaca;
+      font-size: 10px;
+      padding: 1px 6px;
+    }
+
+    .admin-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    @media (min-width: 640px) {
+      .admin-grid {
+        grid-template-columns: 1fr 1fr;
+      }
     }
 
     @media (max-width: 767px) {
@@ -269,15 +323,21 @@
           <h1 class="text-2xl font-bold md:text-3xl">OogWorld Stream + Chat</h1>
         </div>
         <div class="flex items-center gap-2">
+          <button id="admin-btn" class="v-btn">Admin</button>
           <span id="username-badge" class="name-badge"></span>
         </div>
       </header>
+
+      <div id="daylight-banner" class="daylight-banner"></div>
 
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
             <div class="text-sm text-slate-200">MediaMTX WebRTC Stream</div>
             <div class="flex items-center gap-2">
+              <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
+                <img src="/images/red-triangle-warning-icon.svg" alt="Report issue" />
+              </button>
               <span class="live-chip"><span class="live-pulse"></span> LIVE</span>
               <button id="video-settings-btn" class="cog-btn" title="Video settings">&#9881;</button>
             </div>
@@ -299,14 +359,6 @@
           </div>
 
           <div id="chat-messages" class="chat-scroll flex-1 overflow-y-auto px-3 py-2 text-sm"></div>
-
-          <div class="border-t border-neutral-800 p-3">
-            <button id="report-toggle-btn" class="report-toggle-btn">🚨 Emergency Report</button>
-            <div id="report-panel" class="report-panel hidden">
-              <button id="report-food-btn" class="report-btn">🍽️ Food Issue</button>
-              <button id="report-water-btn" class="report-btn">💧 Water Issue</button>
-            </div>
-          </div>
 
           <div class="border-t border-neutral-800 p-2">
             <div class="flex gap-2">
@@ -374,23 +426,66 @@
     </div>
   </div>
 
+  <div id="report-mini-modal" class="report-mini-modal">
+    <div class="mb-2 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-red-100">Report Oogway Need</h3>
+      <button id="report-mini-close" class="cog-btn" title="Close">&#10005;</button>
+    </div>
+    <p class="mb-3 text-xs text-red-200/80">Select what Oogway needs. This will lock reporting until an admin reset.</p>
+    <div class="grid grid-cols-2 gap-2">
+      <button id="report-food-btn" class="report-btn">🍽️ Need Food</button>
+      <button id="report-water-btn" class="report-btn">💧 Need Water</button>
+    </div>
+  </div>
+
+  <div id="admin-modal" class="settings-modal hidden">
+    <div class="settings-panel w-[min(94vw,540px)]">
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-base font-semibold">Admin Panel</h2>
+        <button id="admin-close" class="cog-btn" title="Close">&#10005;</button>
+      </div>
+
+      <div id="admin-login-view">
+        <p class="mb-2 text-xs text-slate-400">Enter admin password to unlock moderation controls.</p>
+        <input id="admin-password-input" type="password" autocomplete="off"
+          class="mb-3 w-full rounded-lg border border-red-500/30 bg-black/50 px-3 py-2 text-sm outline-none focus:border-red-400" />
+        <button id="admin-login-btn" class="w-full rounded-lg bg-red-500 py-2 text-sm font-bold text-white">Login</button>
+      </div>
+
+      <div id="admin-controls-view" class="hidden">
+        <p class="mb-3 text-xs text-slate-400">Reset alerts, clear chat, and delete individual messages directly from chat.</p>
+        <div class="admin-grid mb-3">
+          <button id="admin-reset-food" class="report-btn">Reset Food Alert</button>
+          <button id="admin-reset-water" class="report-btn">Reset Water Alert</button>
+          <button id="admin-reset-all" class="report-btn">Reset All Alerts</button>
+          <button id="admin-clear-chat" class="report-btn">Clear Chat Log</button>
+        </div>
+        <button id="admin-logout-btn" class="w-full rounded-lg border border-red-500/40 bg-red-950/40 py-2 text-sm font-bold text-red-100">Logout</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     (function () {
       "use strict";
 
       var CHAT_RETRY_MS = 2500;
+      var DAYLIGHT_REFRESH_MS = 5 * 60 * 1000;
       var COLOR_OPTIONS = ["#39ff14", "#22d3ee", "#60a5fa", "#a78bfa", "#f472b6", "#fb923c", "#facc15", "#ffffff", "#94a3b8"];
 
       var state = {
         username: sessionStorage.getItem("oogworld_username") || "",
         badgeColor: sessionStorage.getItem("oogworld_badge_color") || "#39ff14",
         chatTextColor: sessionStorage.getItem("oogworld_chat_text_color") || "white",
+        adminToken: sessionStorage.getItem("oogworld_admin_token") || "",
         streams: {},
+        adminConfigured: false,
         ws: null,
         seenMessageIds: {},
+        daylight: null,
         reports: {
-          food: { active: false, reporter: "" },
-          water: { active: false, reporter: "" },
+          food: { active: false, reporter: "", updatedAt: "" },
+          water: { active: false, reporter: "", updatedAt: "" },
         },
       };
 
@@ -406,11 +501,14 @@
         usernameBadge: document.getElementById("username-badge"),
         webrtcFrame: document.getElementById("webrtc-frame"),
         reportBanner: document.getElementById("report-banner"),
+        daylightBanner: document.getElementById("daylight-banner"),
         chatMessages: document.getElementById("chat-messages"),
         chatInput: document.getElementById("chat-input"),
         chatSend: document.getElementById("chat-send"),
-        reportToggleBtn: document.getElementById("report-toggle-btn"),
-        reportPanel: document.getElementById("report-panel"),
+        adminBtn: document.getElementById("admin-btn"),
+        reportIconBtn: document.getElementById("report-icon-btn"),
+        reportMiniModal: document.getElementById("report-mini-modal"),
+        reportMiniClose: document.getElementById("report-mini-close"),
         reportFoodBtn: document.getElementById("report-food-btn"),
         reportWaterBtn: document.getElementById("report-water-btn"),
         videoRefreshBtn: document.getElementById("video-refresh-btn"),
@@ -427,7 +525,20 @@
         videoSettingsModal: document.getElementById("video-settings-modal"),
         videoAutoplay: document.getElementById("video-autoplay"),
         videoAutoReload: document.getElementById("video-auto-reload"),
+        adminModal: document.getElementById("admin-modal"),
+        adminClose: document.getElementById("admin-close"),
+        adminLoginView: document.getElementById("admin-login-view"),
+        adminControlsView: document.getElementById("admin-controls-view"),
+        adminPasswordInput: document.getElementById("admin-password-input"),
+        adminLoginBtn: document.getElementById("admin-login-btn"),
+        adminResetFood: document.getElementById("admin-reset-food"),
+        adminResetWater: document.getElementById("admin-reset-water"),
+        adminResetAll: document.getElementById("admin-reset-all"),
+        adminClearChat: document.getElementById("admin-clear-chat"),
+        adminLogoutBtn: document.getElementById("admin-logout-btn"),
       };
+
+      var reportBannerTimer = null;
 
       function escHtml(s) {
         return String(s)
@@ -466,11 +577,16 @@
         var msgTextBg = msg.textColor === "black" ? "background: #f5f5f5; padding: 0 4px; border-radius: 4px;" : "";
 
         var kindBadge = msg.kind === "action" ? "<span class=\"mr-1 rounded bg-emerald-600/30 px-1.5 py-0.5 text-[10px] text-emerald-200\">ACTION</span>" : "";
+        var canDelete = !!state.adminToken && !!msg.id;
+        var deleteBtn = canDelete
+          ? "<button class=\"admin-delete-btn\" data-delete-id=\"" + escHtml(msg.id) + "\">delete</button>"
+          : "";
         row.innerHTML =
           "<span class=\"text-[11px] text-slate-500\">[" + escHtml(time) + "]</span> " +
           kindBadge +
           "<span class=\"font-semibold\" style=\"color:" + escHtml(msg.usernameColor || "#a3e635") + "\">" + escHtml(msg.username || "Anonymous") + "</span>: " +
-          "<span style=\"color:" + msgTextColor + "; " + msgTextBg + "\">" + escHtml(msg.text || "") + "</span>";
+          "<span style=\"color:" + msgTextColor + "; " + msgTextBg + "\">" + escHtml(msg.text || "") + "</span>" +
+          deleteBtn;
 
         el.chatMessages.appendChild(row);
         el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
@@ -484,10 +600,63 @@
         try {
           var r = await fetch("/api/health");
           if (!r.ok) return null;
-          return await r.json();
+          var payload = await r.json();
+          state.adminConfigured = payload.adminConfigured === "yes";
+          return payload;
         } catch (e) {
           return null;
         }
+      }
+
+      function formatDuration(totalSeconds) {
+        var secs = Math.max(0, Math.floor(totalSeconds || 0));
+        var h = Math.floor(secs / 3600);
+        var m = Math.floor((secs % 3600) / 60);
+        var s = secs % 60;
+        if (h > 0) {
+          return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+        }
+        return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+      }
+
+      async function loadDaylight() {
+        try {
+          var resp = await fetch("/api/daylight");
+          if (!resp.ok) return;
+          state.daylight = await resp.json();
+          state.daylight._fetchedAtMs = Date.now();
+          renderDaylightBanner();
+        } catch (e) {
+          // ignore transient errors
+        }
+      }
+
+      function renderDaylightBanner() {
+        if (!state.daylight || state.daylight.cacheError) {
+          el.daylightBanner.classList.remove("show");
+          el.daylightBanner.textContent = "";
+          return;
+        }
+
+        var fetchedAt = state.daylight._fetchedAtMs || Date.now();
+        var elapsed = Math.floor((Date.now() - fetchedAt) / 1000);
+        var untilSunrise = Math.max(0, (state.daylight.secondsUntilSunrise || 0) - elapsed);
+        var untilSunset = Math.max(0, (state.daylight.secondsUntilSunset || 0) - elapsed);
+
+        if (state.daylight.asleep) {
+          el.daylightBanner.textContent = "😴 oogway is asleep, his heatlamp will turn on in " + formatDuration(untilSunrise);
+          el.daylightBanner.classList.add("show");
+          return;
+        }
+
+        if (state.daylight.bedtimeSoon) {
+          el.daylightBanner.textContent = "🌙 Bedtime countdown: Oogway's heatlamp turns off in " + formatDuration(untilSunset);
+          el.daylightBanner.classList.add("show");
+          return;
+        }
+
+        el.daylightBanner.classList.remove("show");
+        el.daylightBanner.textContent = "";
       }
 
       function setWebRtcSource(forceReload) {
@@ -547,27 +716,48 @@
         }
       }
 
+      function allReportsLocked() {
+        return !!((state.reports.food && state.reports.food.active) || (state.reports.water && state.reports.water.active));
+      }
+
+      function activeReportLine(kindKey) {
+        var item = state.reports[kindKey] || {};
+        if (!item.active) return "";
+        var who = item.reporter || "USER";
+        var need = kindKey === "food" ? "food" : "water";
+        var since = 0;
+        if (item.updatedAt) {
+          since = Math.floor((Date.now() - new Date(item.updatedAt).getTime()) / 1000);
+          if (!isFinite(since) || since < 0) since = 0;
+        }
+        return who + " has reported that Oogway needs " + need + " | " + formatDuration(since) + " ago";
+      }
+
       function renderReports() {
         var foodActive = !!(state.reports.food && state.reports.food.active);
         var waterActive = !!(state.reports.water && state.reports.water.active);
 
         el.reportFoodBtn.classList.toggle("active", foodActive);
         el.reportWaterBtn.classList.toggle("active", waterActive);
-        el.reportFoodBtn.textContent = (foodActive ? "✅ " : "🍽️ ") + "Food Issue";
-        el.reportWaterBtn.textContent = (waterActive ? "✅ " : "💧 ") + "Water Issue";
+        el.reportFoodBtn.textContent = (foodActive ? "🔒 " : "🍽️ ") + "Need Food";
+        el.reportWaterBtn.textContent = (waterActive ? "🔒 " : "💧 ") + "Need Water";
+        el.reportFoodBtn.disabled = foodActive;
+        el.reportWaterBtn.disabled = waterActive;
+
+        var locked = allReportsLocked();
+        el.reportIconBtn.classList.toggle("locked", locked);
+        el.reportIconBtn.title = locked ? "Report locked until admin reset" : "Report issue";
 
         var lines = [];
         if (foodActive) {
-          var byFood = state.reports.food.reporter || "Someone";
-          lines.push("🍽️ " + byFood + " reported Oogway is out of food");
+          lines.push(activeReportLine("food"));
         }
         if (waterActive) {
-          var byWater = state.reports.water.reporter || "Someone";
-          lines.push("💧 " + byWater + " reported Oogway is out of water");
+          lines.push(activeReportLine("water"));
         }
 
         if (lines.length) {
-          el.reportBanner.textContent = "🚨 " + lines.join(" | ");
+          el.reportBanner.textContent = "🚨 " + lines.join(" || ");
           el.reportBanner.classList.add("show");
         } else {
           el.reportBanner.classList.remove("show");
@@ -576,19 +766,30 @@
               el.reportBanner.textContent = "";
             }
           }, 320);
+          closeReportMini();
+        }
+
+        if (!lines.length && reportBannerTimer) {
+          clearInterval(reportBannerTimer);
+          reportBannerTimer = null;
+        }
+        if (lines.length && !reportBannerTimer) {
+          reportBannerTimer = setInterval(renderReports, 1000);
         }
       }
 
-      async function toggleReport(kind) {
-        var curr = !!(state.reports[kind] && state.reports[kind].active);
-        var next = !curr;
+      async function submitReport(kind) {
+        if (allReportsLocked()) {
+          alert("Reporting is locked until an admin resets the alert.");
+          return;
+        }
         try {
           var resp = await fetch("/api/reports/toggle", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               kind: kind,
-              active: next,
+              active: true,
               username: state.username,
             }),
           });
@@ -598,9 +799,151 @@
             return;
           }
           await loadReports();
+          closeReportMini();
         } catch (e) {
           alert("Network error while sending report");
         }
+      }
+
+      function openReportMini() {
+        if (allReportsLocked()) {
+          return;
+        }
+        el.reportMiniModal.classList.add("show");
+      }
+
+      function closeReportMini() {
+        el.reportMiniModal.classList.remove("show");
+      }
+
+      function authHeaders() {
+        return state.adminToken ? { "X-Admin-Token": state.adminToken } : {};
+      }
+
+      async function adminLogin() {
+        if (!state.adminConfigured) {
+          alert("ADMIN_PASSWORD is not configured on server.");
+          return;
+        }
+        var pw = (el.adminPasswordInput.value || "").trim();
+        if (!pw) return;
+        try {
+          var resp = await fetch("/api/admin/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: pw }),
+          });
+          if (!resp.ok) {
+            alert("Invalid admin password");
+            return;
+          }
+          var payload = await resp.json();
+          state.adminToken = payload.token || "";
+          sessionStorage.setItem("oogworld_admin_token", state.adminToken);
+          renderAdminView();
+          redrawChatWithAdminControls();
+          el.adminPasswordInput.value = "";
+        } catch (e) {
+          alert("Admin login failed");
+        }
+      }
+
+      function adminLogout() {
+        state.adminToken = "";
+        sessionStorage.removeItem("oogworld_admin_token");
+        renderAdminView();
+        redrawChatWithAdminControls();
+      }
+
+      function renderAdminView() {
+        var logged = !!state.adminToken;
+        el.adminLoginView.classList.toggle("hidden", logged);
+        el.adminControlsView.classList.toggle("hidden", !logged);
+      }
+
+      function openAdminModal() {
+        renderAdminView();
+        el.adminModal.classList.remove("hidden");
+      }
+
+      function closeAdminModal() {
+        el.adminModal.classList.add("hidden");
+      }
+
+      async function adminResetReports(kind) {
+        if (!state.adminToken) {
+          alert("Admin login required");
+          return;
+        }
+        try {
+          var resp = await fetch("/api/admin/reports/reset", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+            body: JSON.stringify({ kind: kind }),
+          });
+          if (!resp.ok) {
+            alert("Failed to reset alerts");
+            return;
+          }
+          await loadReports();
+        } catch (e) {
+          alert("Network error while resetting alerts");
+        }
+      }
+
+      async function adminDeleteMessage(id) {
+        if (!state.adminToken) return;
+        try {
+          var resp = await fetch("/api/admin/chat/" + encodeURIComponent(id), {
+            method: "DELETE",
+            headers: authHeaders(),
+          });
+          if (!resp.ok) {
+            alert("Delete failed");
+            return;
+          }
+          var rows = el.chatMessages.querySelectorAll("[data-delete-id]");
+          rows.forEach(function (btn) {
+            if (btn.getAttribute("data-delete-id") === id) {
+              var row = btn.closest("div");
+              if (row) row.remove();
+            }
+          });
+        } catch (e) {
+          alert("Network error while deleting message");
+        }
+      }
+
+      async function adminClearChat() {
+        if (!state.adminToken) return;
+        try {
+          var resp = await fetch("/api/admin/chat/clear", {
+            method: "POST",
+            headers: authHeaders(),
+          });
+          if (!resp.ok) {
+            alert("Failed to clear chat");
+            return;
+          }
+          state.seenMessageIds = {};
+          el.chatMessages.innerHTML = "";
+        } catch (e) {
+          alert("Network error while clearing chat");
+        }
+      }
+
+      function redrawChatWithAdminControls() {
+        var rows = Array.prototype.slice.call(el.chatMessages.children);
+        el.chatMessages.innerHTML = "";
+        state.seenMessageIds = {};
+        rows.forEach(function () {
+          // UI is source-of-truth from websocket + initial history, so reload via websocket reconnect.
+        });
+        if (state.ws) {
+          state.ws.onclose = null;
+          state.ws.close();
+        }
+        connectChat();
       }
 
       function buildColorSwatches(selected) {
@@ -702,7 +1045,10 @@
         setWebRtcSource(true);
         connectChat();
         await loadReports();
+        await loadDaylight();
         setInterval(loadReports, 15000);
+        setInterval(loadDaylight, DAYLIGHT_REFRESH_MS);
+        setInterval(renderDaylightBanner, 1000);
       }
 
       el.loginBtn.addEventListener("click", doLogin);
@@ -715,14 +1061,51 @@
         if (e.key === "Enter") sendChat();
       });
 
-      el.reportToggleBtn.addEventListener("click", function () {
-        el.reportPanel.classList.toggle("hidden");
-      });
+      el.reportIconBtn.addEventListener("click", openReportMini);
+      el.reportMiniClose.addEventListener("click", closeReportMini);
       el.reportFoodBtn.addEventListener("click", function () {
-        toggleReport("food");
+        submitReport("food");
       });
       el.reportWaterBtn.addEventListener("click", function () {
-        toggleReport("water");
+        submitReport("water");
+      });
+
+      document.addEventListener("click", function (e) {
+        var inModal = el.reportMiniModal.contains(e.target);
+        var onButton = e.target === el.reportIconBtn || el.reportIconBtn.contains(e.target);
+        if (!inModal && !onButton) {
+          closeReportMini();
+        }
+      });
+
+      el.adminBtn.addEventListener("click", openAdminModal);
+      el.adminClose.addEventListener("click", closeAdminModal);
+      el.adminModal.addEventListener("click", function (e) {
+        if (e.target === el.adminModal) closeAdminModal();
+      });
+      el.adminLoginBtn.addEventListener("click", adminLogin);
+      el.adminPasswordInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") adminLogin();
+      });
+      el.adminResetFood.addEventListener("click", function () {
+        adminResetReports("food");
+      });
+      el.adminResetWater.addEventListener("click", function () {
+        adminResetReports("water");
+      });
+      el.adminResetAll.addEventListener("click", function () {
+        adminResetReports("all");
+      });
+      el.adminClearChat.addEventListener("click", adminClearChat);
+      el.adminLogoutBtn.addEventListener("click", adminLogout);
+
+      el.chatMessages.addEventListener("click", function (e) {
+        var target = e.target;
+        if (!target || !target.getAttribute) return;
+        var id = target.getAttribute("data-delete-id");
+        if (id) {
+          adminDeleteMessage(id);
+        }
       });
 
       el.videoRefreshBtn.addEventListener("click", function () {
@@ -747,6 +1130,7 @@
       if (state.username) {
         el.loginOverlay.classList.add("hidden");
         el.app.classList.remove("hidden");
+        renderAdminView();
         bootstrap();
       }
     }());
