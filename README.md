@@ -118,8 +118,11 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 - **Locked Emergency Alerts**: Once a user reports food/water need, alert stays locked until an admin reset
 - **Red Alert Banner**: Displays `USER has reported that Oogway needs XXX` and a live timer since report time
 - **Admin Panel**: Password-gated admin tools for resetting alerts, deleting chat messages, and clearing chat log
+- **GhostWorld Takeover Branding**: UI now presents `www.ghostworld.dev` as overtaken by OogWorld
+- **Closable Tip Cards**: Dismissible welcome and app-info tips shown in the main dashboard
 - **Heatlamp Daylight Automation**: Sunrise/sunset schedule fetched from `https://sunrise-sunset.org/api` several times per day
 - **Bedtime Banners**: Countdown appears before sunset; overnight banner shows `oogway is asleep, his heatlamp will turn on in XX:XX`
+- **Night Mode**: When Oogway is asleep, the app shifts into moon-and-stars night theme
 - **Responsive Design**: Desktop layout (video left, controls right) and mobile stack (video top, buttons bottom)
 - **GhostWorld Aesthetic**: Dark theme with accent colors (#39FF14 lime, #050505 background)
 - **Live Status Pulse**: Animated breathing dot indicates stream is live
@@ -164,7 +167,7 @@ The application is designed with extension points for:
 
 ## Version
 
-- Current: 0.1.2
+- Current: 0.2.0
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog

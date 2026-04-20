@@ -20,6 +20,71 @@
       font-family: "Trebuchet MS", "Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
       background: radial-gradient(circle at 80% -10%, rgba(57, 255, 20, 0.12), transparent 35%), #000;
       color: var(--text);
+      transition: background 0.6s ease, color 0.3s ease;
+    }
+
+    body.night-mode {
+      background:
+        radial-gradient(circle at 20% 10%, rgba(148, 163, 184, 0.22), transparent 28%),
+        radial-gradient(circle at 78% -20%, rgba(56, 189, 248, 0.16), transparent 40%),
+        linear-gradient(180deg, #020617 0%, #030712 55%, #000000 100%);
+    }
+
+    .night-sky {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.45s ease;
+      background-image:
+        radial-gradient(2px 2px at 8% 18%, rgba(255, 255, 255, 0.85), transparent),
+        radial-gradient(2px 2px at 24% 52%, rgba(255, 255, 255, 0.8), transparent),
+        radial-gradient(1.5px 1.5px at 32% 28%, rgba(255, 255, 255, 0.75), transparent),
+        radial-gradient(2px 2px at 51% 14%, rgba(255, 255, 255, 0.82), transparent),
+        radial-gradient(2px 2px at 66% 38%, rgba(255, 255, 255, 0.78), transparent),
+        radial-gradient(1.5px 1.5px at 74% 62%, rgba(255, 255, 255, 0.8), transparent),
+        radial-gradient(2px 2px at 88% 24%, rgba(255, 255, 255, 0.86), transparent),
+        radial-gradient(2px 2px at 94% 74%, rgba(255, 255, 255, 0.72), transparent),
+        radial-gradient(1.5px 1.5px at 14% 74%, rgba(255, 255, 255, 0.75), transparent),
+        radial-gradient(2px 2px at 42% 82%, rgba(255, 255, 255, 0.8), transparent);
+      animation: twinkle 3.2s ease-in-out infinite alternate;
+    }
+
+    .night-sky.show {
+      opacity: 0.92;
+    }
+
+    .night-sky .moon {
+      position: absolute;
+      top: 18px;
+      right: 26px;
+      width: 54px;
+      height: 54px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 40% 35%, #fff8cc, #f5d77a 58%, #b0882c 100%);
+      box-shadow: 0 0 26px rgba(251, 191, 36, 0.55), 0 0 58px rgba(251, 191, 36, 0.35);
+    }
+
+    .night-sky .moon::after {
+      content: "";
+      position: absolute;
+      top: 8px;
+      left: 16px;
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(161, 98, 7, 0.22);
+      box-shadow: 10px 12px 0 rgba(161, 98, 7, 0.18);
+    }
+
+    @keyframes twinkle {
+      0% {
+        filter: brightness(0.9);
+      }
+      100% {
+        filter: brightness(1.12);
+      }
     }
 
     .report-banner {
@@ -193,6 +258,69 @@
       display: block;
     }
 
+    .tip-grid {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 10px;
+      grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 900px) {
+      .tip-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .tip-card {
+      border: 1px solid rgba(74, 222, 128, 0.28);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: linear-gradient(140deg, rgba(6, 78, 59, 0.36), rgba(3, 7, 18, 0.55));
+      position: relative;
+    }
+
+    .tip-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      border: 1px solid rgba(203, 213, 225, 0.28);
+      border-radius: 999px;
+      width: 22px;
+      height: 22px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #e2e8f0;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .tip-close:hover {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    .brand-overrun {
+      border: 1px solid rgba(57, 255, 20, 0.34);
+      border-radius: 999px;
+      padding: 3px 10px;
+      background: rgba(2, 6, 23, 0.38);
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .brand-overrun .ghost {
+      color: #94a3b8;
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+
+    .brand-overrun .oog {
+      color: #86efac;
+      font-weight: 700;
+    }
+
     .report-icon-btn {
       width: 30px;
       height: 30px;
@@ -301,12 +429,13 @@
   </style>
 </head>
 <body class="min-h-screen">
+  <div id="night-sky" class="night-sky"><div class="moon"></div></div>
   <div id="report-banner" class="report-banner"></div>
 
   <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85">
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
-      <p class="text-xs uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
-      <h1 class="mt-1 text-3xl font-bold">OogWorld Live</h1>
+      <p class="text-xs uppercase tracking-[0.3em] text-slate-300/80">www.ghostworld.dev</p>
+      <h1 class="mt-1 text-3xl font-bold">OogWorld Takeover</h1>
       <p class="mt-2 text-sm text-slate-400">Enter your username to join chat.</p>
       <input id="username-input" type="text" maxlength="24" autocomplete="off" placeholder="Username"
         class="mt-5 w-full rounded-xl border border-lime-500/30 bg-black/50 px-4 py-3 text-center outline-none focus:border-lime-400" />
@@ -319,7 +448,7 @@
     <main class="mx-auto max-w-7xl px-3 pb-24 pt-4 md:px-4 md:pb-8 md:pt-6">
       <header class="mb-3 flex items-center justify-between">
         <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-lime-300/80">GhostWorld</p>
+          <p class="brand-overrun"><span class="ghost">www.ghostworld.dev</span><span class="oog">oogworld takeover</span></p>
           <h1 class="text-2xl font-bold md:text-3xl">OogWorld Stream + Chat</h1>
         </div>
         <div class="flex items-center gap-2">
@@ -329,6 +458,18 @@
       </header>
 
       <div id="daylight-banner" class="daylight-banner"></div>
+      <div id="tip-grid" class="tip-grid">
+        <article id="tip-welcome" class="tip-card">
+          <button id="tip-welcome-close" class="tip-close" title="Dismiss">&#10005;</button>
+          <p class="mb-1 text-xs uppercase tracking-[0.22em] text-emerald-200/80">Welcome To Chat</p>
+          <p class="text-sm text-slate-100/95">Welcome to the chat. Keep it friendly, short, and useful so Oogway care updates are easy to spot.</p>
+        </article>
+        <article id="tip-about" class="tip-card">
+          <button id="tip-about-close" class="tip-close" title="Dismiss">&#10005;</button>
+          <p class="mb-1 text-xs uppercase tracking-[0.22em] text-emerald-200/80">About OogWorld</p>
+          <p class="text-sm text-slate-100/95">This is www.ghostworld.dev, but Oogway took over. Live stream, care requests, emergency reports, and admin controls all live here.</p>
+        </article>
+      </div>
 
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
@@ -501,7 +642,13 @@
         usernameBadge: document.getElementById("username-badge"),
         webrtcFrame: document.getElementById("webrtc-frame"),
         reportBanner: document.getElementById("report-banner"),
+        nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
+        tipGrid: document.getElementById("tip-grid"),
+        tipWelcome: document.getElementById("tip-welcome"),
+        tipWelcomeClose: document.getElementById("tip-welcome-close"),
+        tipAbout: document.getElementById("tip-about"),
+        tipAboutClose: document.getElementById("tip-about-close"),
         chatMessages: document.getElementById("chat-messages"),
         chatInput: document.getElementById("chat-input"),
         chatSend: document.getElementById("chat-send"),
@@ -539,6 +686,10 @@
       };
 
       var reportBannerTimer = null;
+      var tipState = {
+        welcome: localStorage.getItem("oog_tip_welcome_closed") === "1",
+        about: localStorage.getItem("oog_tip_about_closed") === "1",
+      };
 
       function escHtml(s) {
         return String(s)
@@ -619,6 +770,30 @@
         return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
       }
 
+      function setNightMode(active) {
+        document.body.classList.toggle("night-mode", !!active);
+        el.nightSky.classList.toggle("show", !!active);
+      }
+
+      function renderTips() {
+        el.tipWelcome.style.display = tipState.welcome ? "none" : "block";
+        el.tipAbout.style.display = tipState.about ? "none" : "block";
+        var allHidden = tipState.welcome && tipState.about;
+        el.tipGrid.style.display = allHidden ? "none" : "grid";
+      }
+
+      function closeTip(name) {
+        if (name === "welcome") {
+          tipState.welcome = true;
+          localStorage.setItem("oog_tip_welcome_closed", "1");
+        }
+        if (name === "about") {
+          tipState.about = true;
+          localStorage.setItem("oog_tip_about_closed", "1");
+        }
+        renderTips();
+      }
+
       async function loadDaylight() {
         try {
           var resp = await fetch("/api/daylight");
@@ -633,6 +808,7 @@
 
       function renderDaylightBanner() {
         if (!state.daylight || state.daylight.cacheError) {
+          setNightMode(false);
           el.daylightBanner.classList.remove("show");
           el.daylightBanner.textContent = "";
           return;
@@ -644,11 +820,13 @@
         var untilSunset = Math.max(0, (state.daylight.secondsUntilSunset || 0) - elapsed);
 
         if (state.daylight.asleep) {
+          setNightMode(true);
           el.daylightBanner.textContent = "😴 oogway is asleep, his heatlamp will turn on in " + formatDuration(untilSunrise);
           el.daylightBanner.classList.add("show");
           return;
         }
 
+        setNightMode(false);
         if (state.daylight.bedtimeSoon) {
           el.daylightBanner.textContent = "🌙 Bedtime countdown: Oogway's heatlamp turns off in " + formatDuration(untilSunset);
           el.daylightBanner.classList.add("show");
@@ -1035,6 +1213,7 @@
 
       async function bootstrap() {
         applyBadge();
+        renderTips();
 
         var health = await loadHealth();
         if (!health || !health.streams || (!health.streams.webrtc && !health.streams.webrtcDirect)) {
@@ -1125,6 +1304,13 @@
       el.videoSettingsSave.addEventListener("click", saveVideoSettings);
       el.videoSettingsModal.addEventListener("click", function (e) {
         if (e.target === el.videoSettingsModal) closeVideoSettings();
+      });
+
+      el.tipWelcomeClose.addEventListener("click", function () {
+        closeTip("welcome");
+      });
+      el.tipAboutClose.addEventListener("click", function () {
+        closeTip("about");
       });
 
       if (state.username) {

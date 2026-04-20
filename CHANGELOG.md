@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.0] - 2026-04-20
+- Updated branding to present `www.ghostworld.dev` as the base identity with an OogWorld takeover visual treatment.
+- Added two closable dashboard tip cards: one for welcome-to-chat guidance and one explaining the app.
+- Added automatic night mode that activates when Oogway is asleep, including moon-and-stars visual atmosphere.
+- Preserved daytime styling and automatically exits night mode when Oogway wakes.
+- Updated backend app version to `0.2.0` and synchronized README version/features.
+
 ## [0.1.2] - 2026-04-20
 - Fixed embedded stream `Stream not found` issue by preferring `webrtcDirect` URL for the in-page iframe player (same working path as `Open Player`).
 - Kept `/media/webrtc/...` as fallback path for compatibility.
