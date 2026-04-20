@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
   <style>
     :root {
       --bg: #1c2a1f;
@@ -436,7 +437,7 @@
   <div id="login-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/85">
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-[#d7cfc4]/80">www.ghostworld.dev</p>
-      <h1 class="mt-1 text-3xl font-bold">OogWorld Takeover</h1>
+      <h1 class="mt-1 text-3xl font-bold">OogWorld</h1>
       <p class="mt-2 text-sm text-slate-400">Enter your username to join chat.</p>
       <input id="username-input" type="text" maxlength="24" autocomplete="off" placeholder="Username"
         class="mt-5 w-full rounded-xl border border-[#4caf50]/40 bg-black/50 px-4 py-3 text-center outline-none focus:border-[#81c784]" />
@@ -474,7 +475,7 @@
             </div>
           </div>
           <div class="video-frame-wrap">
-            <iframe id="webrtc-frame" src="" allow="autoplay; fullscreen" loading="lazy"></iframe>
+            <video id="hls-video" autoplay muted playsinline style="width:100%;height:100%;background:#000;display:block;"></video>
           </div>
           <div class="video-controls">
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
@@ -553,7 +554,7 @@
         <span>Enabled</span>
       </label>
 
-      <p class="mb-4 text-xs text-slate-400">WebRTC-only mode is active for reliability.</p>
+      <p class="mb-4 text-xs text-slate-400">HLS low-latency mode via proxy.</p>
 
       <button id="video-settings-save" class="w-full rounded-lg bg-[#4caf50] py-2 text-sm font-bold text-[#0a1f0c]">Save</button>
     </div>
@@ -645,7 +646,7 @@
         usernameInput: document.getElementById("username-input"),
         loginBtn: document.getElementById("login-btn"),
         usernameBadge: document.getElementById("username-badge"),
-        webrtcFrame: document.getElementById("webrtc-frame"),
+        hlsVideo: document.getElementById("hls-video"),
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
@@ -814,16 +815,29 @@
         el.daylightBanner.textContent = "";
       }
 
+      var _hlsInstance = null;
+
       function setWebRtcSource(forceReload) {
-        var src = state.streams.webrtc || state.streams.webrtcDirect || "";
+        var src = state.streams.hls || "";
         if (!src) return;
 
-        if (!videoPrefs.autoplay) {
-          src += (src.indexOf("?") === -1 ? "?" : "&") + "autoplay=0";
+        if (_hlsInstance) {
+          _hlsInstance.destroy();
+          _hlsInstance = null;
         }
 
-        if (forceReload || el.webrtcFrame.src !== src) {
-          el.webrtcFrame.src = src;
+        var video = el.hlsVideo;
+        if (Hls.isSupported()) {
+          var hls = new Hls({ lowLatencyMode: true });
+          _hlsInstance = hls;
+          hls.loadSource(src);
+          hls.attachMedia(video);
+          hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            if (videoPrefs.autoplay) video.play().catch(function () {});
+          });
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = src;
+          if (videoPrefs.autoplay) video.play().catch(function () {});
         }
       }
 
@@ -1173,7 +1187,7 @@
       }
 
       function openPlayerTab() {
-        var url = state.streams.webrtc || state.streams.webrtcDirect || "";
+        var url = state.streams.hls || state.streams.hlsDirect || "";
         if (!url) return;
         window.open(url, "_blank", "noopener,noreferrer");
       }
@@ -1192,8 +1206,8 @@
         applyBadge();
 
         var health = await loadHealth();
-        if (!health || !health.streams || (!health.streams.webrtc && !health.streams.webrtcDirect)) {
-          alert("WebRTC stream not configured. Check STREAM_URL.");
+        if (!health || !health.streams || !health.streams.hls) {
+          alert("Stream not configured. Check STREAM_URL.");
           return;
         }
         state.streams = health.streams;
