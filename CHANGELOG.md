@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.1.1] - 2026-04-20
+- Fixed stream proxy `405 Method Not Allowed` issue by allowing `/media/...` routes to accept WebRTC signaling methods (`POST`, `PATCH`, `DELETE`, `OPTIONS`, plus `GET`/`HEAD`).
+- Updated proxy forwarding to pass through incoming HTTP method, request body, and signaling-relevant headers instead of forcing `GET`.
+- Added passthrough of key upstream response headers (including CORS and `Location`) for MediaMTX WebRTC negotiation compatibility.
+
 ## [0.1.0] - 2026-04-20
 - Reworked emergency reporting UX: replaced chat-area emergency button with a report icon near the video header using the new warning icon asset.
 - Added compact report modal with `Need Food` and `Need Water` options.

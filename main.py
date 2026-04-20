@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 BASE_DIR = Path(__file__).parent
 ACTION_LOG_PATH = Path(os.getenv("ACTIVITY_LOG_PATH", BASE_DIR / "activity_log.json"))
 CHAT_LOG_PATH = Path(os.getenv("CHAT_LOG_PATH", BASE_DIR / "chat_log.json"))
@@ -148,17 +148,38 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
     if query:
         upstream_url += f"?{query}"
 
-    # Keep proxy lean and explicit; enough headers for MediaMTX player assets/segments.
+    # Forward core request headers so MediaMTX WebRTC signaling endpoints behave correctly.
     fwd_headers = {
         "Accept": request.headers.get("accept", "*/*"),
         "User-Agent": request.headers.get("user-agent", "oogworld-proxy"),
     }
+    for h in ["content-type", "authorization", "origin", "referer"]:
+        val = request.headers.get(h)
+        if val:
+            fwd_headers[h] = val
+
+    body = await request.body()
 
     async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        upstream = await client.get(upstream_url, headers=fwd_headers)
+        upstream = await client.request(
+            request.method,
+            upstream_url,
+            headers=fwd_headers,
+            content=body if body else None,
+        )
 
     passthrough = {}
-    for key in ["content-type", "cache-control", "etag", "last-modified"]:
+    for key in [
+        "content-type",
+        "cache-control",
+        "etag",
+        "last-modified",
+        "location",
+        "access-control-allow-origin",
+        "access-control-allow-methods",
+        "access-control-allow-headers",
+        "access-control-expose-headers",
+    ]:
         val = upstream.headers.get(key)
         if val:
             passthrough[key] = val
@@ -409,7 +430,10 @@ def index() -> FileResponse:
     return FileResponse(BASE_DIR / "index.html")
 
 
-@app.get("/media/{mode}/{stream_path:path}")
+@app.api_route(
+    "/media/{mode}/{stream_path:path}",
+    methods=["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
+)
 async def media_proxy(mode: str, stream_path: str, request: Request) -> Response:
     return await proxy_mediastream(mode, stream_path, request)
 

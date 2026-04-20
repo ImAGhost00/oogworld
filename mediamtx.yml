@@ -1,0 +1,21 @@
+logLevel: info
+logDestinations: [stdout]
+
+api: true
+rtsp: true
+hls: true
+webrtc: true
+
+# Changed from "optional" (string) to false (bool) to satisfy the Go parser
+webrtcEncryption: false
+webrtcAllowOrigin: "*"
+
+hlsAlwaysRemux: true
+hlsVariant: lowLatency
+hlsAllowOrigin: "*"
+
+paths:
+  oogway:
+    source: publisher
+    runOnInit: ffmpeg -f dshow -rtbufsize 250M -i video="c922 Pro Stream Webcam" -vcodec h264_qsv -profile:v high -bf 0 -s 1920x1080 -b:v 6M -maxrate 6M -bufsize 12M -preset fast -f rtsp -rtsp_transport tcp rtsp://localhost:$RTSP_PORT/$MTX_PATH
+    runOnInitRestart: true
