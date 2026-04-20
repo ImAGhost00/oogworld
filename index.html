@@ -71,8 +71,23 @@
 
     <section class="grid gap-4 md:grid-cols-5">
       <article class="card overflow-hidden rounded-2xl md:col-span-3">
-        <div class="border-b border-lime-300/20 px-4 py-3 text-sm text-lime-200/80">Terrarium Stream</div>
-        <video id="stream" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
+        <div class="flex items-center justify-between border-b border-lime-300/20 px-4 py-2">
+          <span class="text-sm text-lime-200/80">Terrarium Stream</span>
+          <div id="stream-tabs" class="flex gap-1 text-xs">
+            <button data-type="webrtc" class="stream-tab rounded px-2 py-1 font-semibold">WebRTC</button>
+            <button data-type="hls" class="stream-tab rounded px-2 py-1 font-semibold">HLS</button>
+            <button data-type="llhls" class="stream-tab rounded px-2 py-1 font-semibold">LL-HLS</button>
+          </div>
+        </div>
+        <div id="stream-webrtc" class="stream-panel hidden">
+          <iframe id="webrtc-frame" src="" allow="autoplay; camera; microphone" class="h-[260px] w-full bg-black md:h-[440px]" style="border:0"></iframe>
+        </div>
+        <div id="stream-hls" class="stream-panel hidden">
+          <video id="hls-video" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
+        </div>
+        <div id="stream-llhls" class="stream-panel hidden">
+          <video id="llhls-video" controls autoplay muted playsinline class="h-[260px] w-full bg-black md:h-[440px]"></video>
+        </div>
       </article>
 
       <aside class="card rounded-2xl p-4 md:col-span-2">
@@ -92,10 +107,10 @@
   </div>
 
   <script>
-    const streamEl = document.getElementById("stream");
     const activityList = document.getElementById("activity-list");
     const foodBtn = document.getElementById("food-btn");
     const waterBtn = document.getElementById("water-btn");
+    let hlsInstances = {};
 
     async function loadHealth() {
       const res = await fetch("/api/health");
@@ -146,27 +161,61 @@
       await loadActivity();
     }
 
-    function initStream(url) {
+    const TAB_ACTIVE = "bg-lime-500 text-black";
+    const TAB_IDLE = "text-slate-400 hover:text-slate-100";
+    let streamUrls = {};
+
+    function initHlsVideo(videoEl, url, lowLatency = false) {
+      const key = videoEl.id;
+      if (hlsInstances[key]) { hlsInstances[key].destroy(); }
       if (!url) return;
       if (window.Hls && Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-        });
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: lowLatency });
         hls.loadSource(url);
-        hls.attachMedia(streamEl);
+        hls.attachMedia(videoEl);
+        hlsInstances[key] = hls;
       } else {
-        streamEl.src = url;
+        videoEl.src = url;
       }
     }
+
+    function showStreamType(type) {
+      document.querySelectorAll(".stream-panel").forEach(el => el.classList.add("hidden"));
+      document.querySelectorAll(".stream-tab").forEach(btn => {
+        btn.className = "stream-tab rounded px-2 py-1 font-semibold " +
+          (btn.dataset.type === type ? TAB_ACTIVE : TAB_IDLE);
+      });
+      const panel = document.getElementById("stream-" + type);
+      if (panel) panel.classList.remove("hidden");
+
+      if (type === "webrtc" && streamUrls.webrtc) {
+        const frame = document.getElementById("webrtc-frame");
+        if (!frame.src || frame.src !== streamUrls.webrtc) frame.src = streamUrls.webrtc;
+      } else if (type === "hls" && streamUrls.hls) {
+        initHlsVideo(document.getElementById("hls-video"), streamUrls.hls, false);
+      } else if (type === "llhls" && streamUrls.llhls) {
+        initHlsVideo(document.getElementById("llhls-video"), streamUrls.llhls, true);
+      }
+
+      localStorage.setItem("streamType", type);
+    }
+
+    document.querySelectorAll(".stream-tab").forEach(btn => {
+      btn.addEventListener("click", () => showStreamType(btn.dataset.type));
+    });
 
     foodBtn.addEventListener("click", () => postAction("Request Food"));
     waterBtn.addEventListener("click", () => postAction("Refill Water"));
 
     (async () => {
       const health = await loadHealth();
-      if (health && health.streamConfigured === "yes") {
-        initStream(health.streamUrl || "");
+      if (health && health.streams) {
+        streamUrls = health.streams;
+        const saved = localStorage.getItem("streamType") || "webrtc";
+        showStreamType(saved);
+      } else {
+        // No streams configured — hide tab bar
+        document.getElementById("stream-tabs").classList.add("hidden");
       }
       await loadActivity();
       setInterval(loadActivity, 15000);

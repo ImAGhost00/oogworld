@@ -14,9 +14,34 @@ from pydantic import BaseModel
 APP_VERSION = "0.0.0"
 BASE_DIR = Path(__file__).parent
 LOG_PATH = Path(os.getenv("ACTIVITY_LOG_PATH", BASE_DIR / "activity_log.json"))
-STREAM_URL = os.getenv("STREAM_URL", "")
+STREAM_URL = os.getenv("STREAM_URL", "")  # Base MediaMTX URL e.g. http://host:8889/path/
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 TZ = os.getenv("TZ", "UTC")
+
+
+def derive_stream_urls(base: str) -> dict[str, str]:
+    """Compute all MediaMTX stream URLs from the base WebRTC/HLS URL."""
+    if not base:
+        return {}
+    base = base.rstrip("/")
+    # Detect scheme+host, swap ports for MediaMTX defaults
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(base)
+    host_only = parsed.hostname or ""
+    scheme = parsed.scheme
+    path = parsed.path
+
+    def swap_port(p: int) -> str:
+        return urlunparse((scheme, f"{host_only}:{p}", path, "", "", ""))
+
+    webrtc = swap_port(8889) + "/"
+    hls = swap_port(8888) + "/index.m3u8"
+    llhls = swap_port(8888) + "/index.m3u8?_HLS_skip=YES"
+    rtsp = f"rtsp://{host_only}:8554{path}"
+    return {"webrtc": webrtc, "hls": hls, "llhls": llhls, "rtsp": rtsp}
+
+
+STREAM_URLS = derive_stream_urls(STREAM_URL)
 
 ACTION_MESSAGE: dict[str, str] = {
     "Request Food": "OogWorld request: Please feed Oogway.",
@@ -90,14 +115,14 @@ def index() -> FileResponse:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": APP_VERSION,
         "tz": TZ,
-        "streamUrl": STREAM_URL,
         "streamConfigured": "yes" if STREAM_URL else "no",
         "ntfyConfigured": "yes" if NTFY_TOPIC else "no",
+        "streams": STREAM_URLS,
     }
 
 
