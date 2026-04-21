@@ -485,6 +485,7 @@
           </div>
           <div class="video-controls">
             <div id="stream-switcher" class="flex flex-1 flex-wrap gap-2"></div>
+            <button id="video-switch-btn" class="v-btn">Switch Cams</button>
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
             <button id="video-popout-btn" class="v-btn">Open Player</button>
           </div>
@@ -670,6 +671,7 @@
         reportMiniClose: document.getElementById("report-mini-close"),
         reportFoodBtn: document.getElementById("report-food-btn"),
         reportWaterBtn: document.getElementById("report-water-btn"),
+        videoSwitchBtn: document.getElementById("video-switch-btn"),
         videoRefreshBtn: document.getElementById("video-refresh-btn"),
         videoPopoutBtn: document.getElementById("video-popout-btn"),
         chatSettingsBtn: document.getElementById("chat-settings-btn"),
@@ -855,6 +857,9 @@
 
         el.streamSwitcher.innerHTML = "";
         el.streamSwitcher.style.display = hasSwitcher ? "flex" : "none";
+        el.videoSwitchBtn.disabled = !hasSwitcher;
+        el.videoSwitchBtn.style.opacity = hasSwitcher ? "1" : "0.55";
+        el.videoSwitchBtn.style.cursor = hasSwitcher ? "pointer" : "not-allowed";
 
         if (active) {
           el.currentStreamLabel.textContent = active.label + (active.resolution ? " " + active.resolution : "");
@@ -891,6 +896,25 @@
         if (forceReload) {
           setWebRtcSource(true);
         }
+      }
+
+      function switchToNextStream() {
+        var options = state.streamOptions || [];
+        if (options.length < 2) {
+          return;
+        }
+
+        var active = getActiveStreamOption();
+        var currentIndex = 0;
+        for (var i = 0; i < options.length; i += 1) {
+          if (active && options[i].key === active.key) {
+            currentIndex = i;
+            break;
+          }
+        }
+
+        var nextIndex = (currentIndex + 1) % options.length;
+        selectStream(options[nextIndex].key, true);
       }
 
       var _hlsInstance = null;
@@ -1409,6 +1433,7 @@
       el.videoRefreshBtn.addEventListener("click", function () {
         setWebRtcSource(true);
       });
+      el.videoSwitchBtn.addEventListener("click", switchToNextStream);
       el.videoPopoutBtn.addEventListener("click", openPlayerTab);
 
       el.chatSettingsBtn.addEventListener("click", openChatSettings);

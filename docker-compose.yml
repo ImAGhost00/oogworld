@@ -14,7 +14,9 @@ services:
       MTX_WEBRTC: "no"
       MTX_LOGLEVEL: info
     ports:
-      - "1935:1935"   # RTMP — wall PC pushes here
+      - "1935:1935"   # RTMP ingest from Wall PC (oogway-4k / oogway-1080)
+      - "8888:8888"   # HLS output (debug/verification)
+      - "8554:8554"   # RTSP (optional debug)
     restart: unless-stopped
 
   frontend:
