@@ -1,0 +1,50 @@
+# Single-file MediaMTX config for the Windows Wall PC.
+# Purpose:
+# - Accept RTMP publishes from the local FFmpeg camera scripts on port 1935
+# - Repackage those publishes as HLS on port 8888 for OogWorld on 10.0.0.55
+#
+# Expected stream names:
+# - rtmp://10.0.0.104:1935/oogway-4k
+# - rtmp://10.0.0.104:1935/oogway-1080
+#
+# Expected HLS playback URLs:
+# - http://10.0.0.104:8888/oogway-4k/index.m3u8
+# - http://10.0.0.104:8888/oogway-1080/index.m3u8
+
+logLevel: info
+logDestinations: [stdout]
+
+readTimeout: 10s
+writeTimeout: 10s
+writeQueueSize: 512
+
+# Authentication is open on the local network for this deployment.
+authMethod: internal
+
+# Unused services are disabled to keep the Wall PC config simple.
+api: no
+metrics: no
+pprof: no
+playback: no
+
+rtsp: no
+rtmp: yes
+rtmpAddress: :1935
+
+hls: yes
+hlsAddress: :8888
+hlsEncryption: no
+hlsAlwaysRemux: yes
+hlsVariant: mpegts
+hlsSegmentCount: 4
+hlsSegmentDuration: 1s
+hlsAllowOrigin: '*'
+
+webrtc: no
+
+pathDefaults:
+  source: publisher
+
+paths:
+  oogway-4k: {}
+  oogway-1080: {}

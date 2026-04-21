@@ -12,9 +12,9 @@ services:
     build: .
     container_name: oogworld
     environment:
-      # MediaMTX runs on the Windows Wall PC at 10.0.0.107; OogWorld proxies HLS from there.
-      STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://10.0.0.107:8888/oogway-4k}
-      STREAM_URL_SECONDARY: ${STREAM_URL_SECONDARY:-http://10.0.0.107:8888/oogway-1080}
+      # MediaMTX runs on the Windows Wall PC at 10.0.0.104; OogWorld proxies HLS from there.
+      STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://10.0.0.104:8888/oogway-4k}
+      STREAM_URL_SECONDARY: ${STREAM_URL_SECONDARY:-http://10.0.0.104:8888/oogway-1080}
       STREAM_LABEL_PRIMARY: ${STREAM_LABEL_PRIMARY:-Hut Cam}
       STREAM_LABEL_SECONDARY: ${STREAM_LABEL_SECONDARY:-Water Bowl Cam}
       STREAM_RESOLUTION_PRIMARY: ${STREAM_RESOLUTION_PRIMARY:-1080p}
