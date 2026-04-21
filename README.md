@@ -12,7 +12,7 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 
 ## Prerequisites
 
-1. **MediaMTX** reachable from OogWorld, with the wall PC publishing one or two camera feeds such as `oogway-4k` and `oogway-1080`
+1. **MediaMTX** running on the Windows wall PC and reachable from OogWorld at `10.0.0.107:8888`, with the wall PC publishing one or two camera feeds such as `oogway-4k` and `oogway-1080`
 2. **Docker & Docker Compose** installed on the deployment target
 3. **ntfy.sh topic** created (or use a self-hosted ntfy server)
 4. **Admin password** configured with `ADMIN_PASSWORD`
@@ -50,8 +50,8 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
 
 1. In Portainer, create a new stack and paste the `docker-compose.yml` file
 2. In the **Environment variables** section, add:
-  - `STREAM_URL_PRIMARY` → `http://mediamtx:8888/oogway-4k` or `http://mediamtx:8888/oogway-4k/index.m3u8`
-  - `STREAM_URL_SECONDARY` → `http://mediamtx:8888/oogway-1080` or `http://mediamtx:8888/oogway-1080/index.m3u8`
+  - `STREAM_URL_PRIMARY` → `http://10.0.0.107:8888/oogway-4k` or `http://10.0.0.107:8888/oogway-4k/index.m3u8`
+  - `STREAM_URL_SECONDARY` → `http://10.0.0.107:8888/oogway-1080` or `http://10.0.0.107:8888/oogway-1080/index.m3u8`
   - `STREAM_LABEL_PRIMARY` → `Hut Cam`
   - `STREAM_LABEL_SECONDARY` → `Water Bowl Cam`
   - `STREAM_RESOLUTION_PRIMARY` → `1080p`
@@ -76,8 +76,8 @@ docker compose up --build
 Edit `.env` with your values:
 
 ```env
-STREAM_URL_PRIMARY=http://mediamtx:8888/oogway-4k
-STREAM_URL_SECONDARY=http://mediamtx:8888/oogway-1080
+STREAM_URL_PRIMARY=http://10.0.0.107:8888/oogway-4k
+STREAM_URL_SECONDARY=http://10.0.0.107:8888/oogway-1080
 STREAM_LABEL_PRIMARY=Hut Cam
 STREAM_LABEL_SECONDARY=Water Bowl Cam
 STREAM_RESOLUTION_PRIMARY=1080p
@@ -92,7 +92,7 @@ ACTIVITY_LOG_PATH=/app/activity_log.json
 CHAT_LOG_PATH=/app/chat_log.json
 ```
 
-**Note**: If running OogWorld on a different machine from MediaMTX, replace `mediamtx` with the IP/hostname that OogWorld can reach.
+**Note**: In this deployment, OogWorld runs on `10.0.0.55` and MediaMTX runs on the Windows Wall PC at `10.0.0.107`. If that Wall PC IP changes, update `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` to the new reachable IP or hostname.
 
 ### 2. Start Deployment
 

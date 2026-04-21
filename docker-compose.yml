@@ -1,22 +1,4 @@
 services:
-  mediamtx:
-    image: bluenviron/mediamtx:latest
-    container_name: oogworld-mediamtx
-    environment:
-      MTX_HLS: "yes"
-      MTX_HLSVARIANT: mpegts
-      MTX_HLSSEGMENTCOUNT: "6"
-      MTX_HLSSEGMENTDURATION: 0.5s
-      MTX_HLSALWAYSREMUX: "yes"
-      MTX_HLSALLOWORIGIN: "*"
-      MTX_RTMP: "yes"
-      MTX_RTSP: "yes"
-      MTX_WEBRTC: "no"
-      MTX_LOGLEVEL: info
-    ports:
-      - "1935:1935"   # RTMP ingest from Wall PC (oogway-4k / oogway-1080)
-    restart: unless-stopped
-
   frontend:
     build:
       context: ./frontend
@@ -29,12 +11,10 @@ services:
   oogworld:
     build: .
     container_name: oogworld
-    depends_on:
-      - mediamtx
     environment:
-      # MediaMTX runs as a Docker service; wall PC pushes RTMP to server port 1935.
-      STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://mediamtx:8888/oogway-4k}
-      STREAM_URL_SECONDARY: ${STREAM_URL_SECONDARY:-http://mediamtx:8888/oogway-1080}
+      # MediaMTX runs on the Windows Wall PC at 10.0.0.107; OogWorld proxies HLS from there.
+      STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://10.0.0.107:8888/oogway-4k}
+      STREAM_URL_SECONDARY: ${STREAM_URL_SECONDARY:-http://10.0.0.107:8888/oogway-1080}
       STREAM_LABEL_PRIMARY: ${STREAM_LABEL_PRIMARY:-Hut Cam}
       STREAM_LABEL_SECONDARY: ${STREAM_LABEL_SECONDARY:-Water Bowl Cam}
       STREAM_RESOLUTION_PRIMARY: ${STREAM_RESOLUTION_PRIMARY:-1080p}
