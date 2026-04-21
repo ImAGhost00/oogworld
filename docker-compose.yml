@@ -33,7 +33,12 @@ services:
       - mediamtx
     environment:
       # MediaMTX runs as a Docker service; wall PC pushes RTMP to server port 1935.
-      STREAM_URL: ${STREAM_URL:-http://mediamtx:8888/oogway}
+      STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://mediamtx:8888/oogway-4k}
+      STREAM_URL_SECONDARY: ${STREAM_URL_SECONDARY:-http://mediamtx:8888/oogway-1080}
+      STREAM_LABEL_PRIMARY: ${STREAM_LABEL_PRIMARY:-Hut Cam}
+      STREAM_LABEL_SECONDARY: ${STREAM_LABEL_SECONDARY:-Water Bowl Cam}
+      STREAM_RESOLUTION_PRIMARY: ${STREAM_RESOLUTION_PRIMARY:-1080p}
+      STREAM_RESOLUTION_SECONDARY: ${STREAM_RESOLUTION_SECONDARY:-720p}
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
       TZ: ${TZ:-UTC}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

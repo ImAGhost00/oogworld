@@ -253,6 +253,12 @@
       background: rgba(240, 235, 229, 0.18);
     }
 
+    .v-btn.active {
+      border-color: rgba(76, 175, 80, 0.8);
+      background: rgba(76, 175, 80, 0.22);
+      color: #dff6e0;
+    }
+
     .daylight-banner {
       border: 1px solid rgba(126, 147, 124, 0.35);
       border-radius: 10px;
@@ -462,7 +468,7 @@
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <div class="text-sm text-slate-100">Now Streaming: Oogway Cam</div>
+            <div class="text-sm text-slate-100">Now Streaming: <span id="current-stream-label">Oogway Cam</span></div>
             <div class="flex items-center gap-2">
               <div class="relative">
                 <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
@@ -478,6 +484,7 @@
             <video id="hls-video" autoplay muted playsinline style="width:100%;height:100%;background:#000;display:block;"></video>
           </div>
           <div class="video-controls">
+            <div id="stream-switcher" class="flex flex-1 flex-wrap gap-2"></div>
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
             <button id="video-popout-btn" class="v-btn">Open Player</button>
           </div>
@@ -626,6 +633,8 @@
         chatTextColor: sessionStorage.getItem("oogworld_chat_text_color") || "white",
         adminToken: sessionStorage.getItem("oogworld_admin_token") || "",
         streams: {},
+        streamOptions: [],
+        activeStreamKey: localStorage.getItem("oogworld_active_stream_key") || "",
         adminConfigured: false,
         ws: null,
         seenMessageIds: {},
@@ -647,6 +656,8 @@
         loginBtn: document.getElementById("login-btn"),
         usernameBadge: document.getElementById("username-badge"),
         hlsVideo: document.getElementById("hls-video"),
+        currentStreamLabel: document.getElementById("current-stream-label"),
+        streamSwitcher: document.getElementById("stream-switcher"),
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
@@ -813,6 +824,73 @@
 
         el.daylightBanner.classList.remove("show");
         el.daylightBanner.textContent = "";
+      }
+
+      function getActiveStreamOption() {
+        var options = state.streamOptions || [];
+        if (!options.length) {
+          if (state.streams && state.streams.hls) {
+            return {
+              key: "primary",
+              label: "Oogway Cam",
+              resolution: "Live",
+              urls: state.streams,
+            };
+          }
+          return null;
+        }
+
+        for (var i = 0; i < options.length; i += 1) {
+          if (options[i].key === state.activeStreamKey) {
+            return options[i];
+          }
+        }
+        return options[0];
+      }
+
+      function renderStreamSwitcher() {
+        var options = state.streamOptions || [];
+        var active = getActiveStreamOption();
+        var hasSwitcher = options.length > 1;
+
+        el.streamSwitcher.innerHTML = "";
+        el.streamSwitcher.style.display = hasSwitcher ? "flex" : "none";
+
+        if (active) {
+          el.currentStreamLabel.textContent = active.label + (active.resolution ? " " + active.resolution : "");
+        } else {
+          el.currentStreamLabel.textContent = "Oogway Cam";
+        }
+
+        if (!hasSwitcher) {
+          return;
+        }
+
+        options.forEach(function (option) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "v-btn" + (active && option.key === active.key ? " active" : "");
+          btn.textContent = option.label + (option.resolution ? " • " + option.resolution : "");
+          btn.addEventListener("click", function () {
+            selectStream(option.key, true);
+          });
+          el.streamSwitcher.appendChild(btn);
+        });
+      }
+
+      function selectStream(key, forceReload) {
+        state.activeStreamKey = key || "";
+        if (state.activeStreamKey) {
+          localStorage.setItem("oogworld_active_stream_key", state.activeStreamKey);
+        }
+
+        var active = getActiveStreamOption();
+        state.streams = active ? (active.urls || {}) : {};
+        renderStreamSwitcher();
+
+        if (forceReload) {
+          setWebRtcSource(true);
+        }
       }
 
       var _hlsInstance = null;
@@ -1241,11 +1319,27 @@
         applyBadge();
 
         var health = await loadHealth();
-        if (!health || !health.streams || !health.streams.hls) {
-          alert("Stream not configured. Check STREAM_URL.");
+        if (!health) {
+          alert("Failed to load dashboard health.");
           return;
         }
-        state.streams = health.streams;
+
+        state.streamOptions = Array.isArray(health.streamOptions) ? health.streamOptions : [];
+        if (!state.streamOptions.length && health.streams && health.streams.hls) {
+          state.streamOptions = [{
+            key: "primary",
+            label: "Oogway Cam",
+            resolution: "Live",
+            urls: health.streams,
+          }];
+        }
+
+        if (!state.streamOptions.length) {
+          alert("Stream not configured. Check STREAM_URL_PRIMARY or STREAM_URL.");
+          return;
+        }
+
+        selectStream(state.activeStreamKey || state.streamOptions[0].key, false);
         setWebRtcSource(true);
         connectChat();
         await loadReports();

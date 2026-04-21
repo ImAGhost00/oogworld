@@ -20,7 +20,12 @@ APP_VERSION = "0.2.2"
 BASE_DIR = Path(__file__).parent
 ACTION_LOG_PATH = Path(os.getenv("ACTIVITY_LOG_PATH", BASE_DIR / "activity_log.json"))
 CHAT_LOG_PATH = Path(os.getenv("CHAT_LOG_PATH", BASE_DIR / "chat_log.json"))
-STREAM_URL = os.getenv("STREAM_URL", "")
+STREAM_URL_PRIMARY = os.getenv("STREAM_URL_PRIMARY", os.getenv("STREAM_URL", ""))
+STREAM_URL_SECONDARY = os.getenv("STREAM_URL_SECONDARY", "")
+STREAM_LABEL_PRIMARY = os.getenv("STREAM_LABEL_PRIMARY", "Hut Cam")
+STREAM_LABEL_SECONDARY = os.getenv("STREAM_LABEL_SECONDARY", "Water Bowl Cam")
+STREAM_RESOLUTION_PRIMARY = os.getenv("STREAM_RESOLUTION_PRIMARY", "1080p")
+STREAM_RESOLUTION_SECONDARY = os.getenv("STREAM_RESOLUTION_SECONDARY", "720p")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 TZ = os.getenv("TZ", "UTC")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
@@ -103,7 +108,7 @@ def derive_stream_urls(base: str) -> dict[str, str]:
     parsed = urlparse(base)
     host_only = parsed.hostname or ""
     scheme = parsed.scheme or "http"
-    path = parsed.path.lstrip("/")
+    path = extract_stream_path(base)
 
     def swap_port(p: int) -> str:
         return urlunparse((scheme, f"{host_only}:{p}", f"/{path}", "", "", ""))
@@ -124,6 +129,67 @@ def derive_stream_urls(base: str) -> dict[str, str]:
     }
 
 
+def extract_stream_path(base: str) -> str:
+    parsed = urlparse(base.rstrip("/"))
+    path = parsed.path.lstrip("/")
+    if path.endswith("/index.m3u8"):
+        return path[: -len("/index.m3u8")]
+    return path
+
+
+def build_stream_option(key: str, label: str, base: str, resolution: str) -> dict[str, Any] | None:
+    if not base:
+        return None
+    stream_path = extract_stream_path(base)
+    if not stream_path:
+        return None
+    return {
+        "key": key,
+        "label": label,
+        "resolution": resolution,
+        "path": stream_path,
+        "base": base.rstrip("/"),
+        "urls": derive_stream_urls(base),
+    }
+
+
+def get_configured_streams() -> list[dict[str, Any]]:
+    streams: list[dict[str, Any]] = []
+    primary = build_stream_option(
+        "primary",
+        STREAM_LABEL_PRIMARY,
+        STREAM_URL_PRIMARY,
+        STREAM_RESOLUTION_PRIMARY,
+    )
+    secondary = build_stream_option(
+        "secondary",
+        STREAM_LABEL_SECONDARY,
+        STREAM_URL_SECONDARY,
+        STREAM_RESOLUTION_SECONDARY,
+    )
+    if primary:
+        streams.append(primary)
+    if secondary:
+        streams.append(secondary)
+    return streams
+
+
+def get_default_stream_urls() -> dict[str, str]:
+    streams = get_configured_streams()
+    if not streams:
+        return {}
+    return streams[0]["urls"]
+
+
+def get_stream_for_proxy_path(stream_path: str) -> dict[str, Any] | None:
+    streams = sorted(get_configured_streams(), key=lambda item: len(item["path"]), reverse=True)
+    for stream in streams:
+        prefix = stream["path"].rstrip("/")
+        if stream_path == prefix or stream_path.startswith(prefix + "/"):
+            return stream
+    return None
+
+
 def get_stream_origin(base: str) -> str:
     parsed = urlparse(base.rstrip("/"))
     if not parsed.hostname:
@@ -135,12 +201,13 @@ def get_stream_origin(base: str) -> str:
 async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Response:
     if mode not in {"webrtc", "hls"}:
         raise HTTPException(status_code=404, detail="Unknown stream mode")
-    if not STREAM_URL:
-        raise HTTPException(status_code=503, detail="STREAM_URL is not configured")
+    stream = get_stream_for_proxy_path(stream_path)
+    if not stream:
+        raise HTTPException(status_code=503, detail="Stream path is not configured")
 
-    origin = get_stream_origin(STREAM_URL)
+    origin = get_stream_origin(stream["base"])
     if not origin:
-        raise HTTPException(status_code=500, detail="STREAM_URL is invalid")
+        raise HTTPException(status_code=500, detail="Configured stream URL is invalid")
 
     upstream_port = 8889 if mode == "webrtc" else 8888
     query = request.url.query
@@ -461,14 +528,24 @@ async def media_proxy(mode: str, stream_path: str, request: Request) -> Response
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
+    streams = get_configured_streams()
     return {
         "status": "ok",
         "version": APP_VERSION,
         "tz": TZ,
-        "streamConfigured": "yes" if STREAM_URL else "no",
+        "streamConfigured": "yes" if streams else "no",
         "ntfyConfigured": "yes" if NTFY_TOPIC else "no",
         "adminConfigured": "yes" if ADMIN_PASSWORD else "no",
-        "streams": derive_stream_urls(STREAM_URL),
+        "streams": get_default_stream_urls(),
+        "streamOptions": [
+            {
+                "key": stream["key"],
+                "label": stream["label"],
+                "resolution": stream["resolution"],
+                "urls": stream["urls"],
+            }
+            for stream in streams
+        ],
     }
 
 

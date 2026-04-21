@@ -1,6 +1,6 @@
 # OogWorld Dashboard v0.1.0
 
-A real-time terrarium monitoring and control dashboard for Oogway's enclosure, featuring live HLS stream playback and action notifications via ntfy.
+A real-time terrarium monitoring and control dashboard for Oogway's enclosure, featuring live HLS stream playback, selectable dual-camera views, and action notifications via ntfy.
 
 ## Architecture
 
@@ -12,24 +12,35 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 
 ## Prerequisites
 
-1. **MediaMTX** running on your wall PC with the `oogway` stream configured and outputting HLS at `http://localhost:8554/oogway/index.m3u8`
+1. **MediaMTX** reachable from OogWorld, with the wall PC publishing one or two camera feeds such as `oogway-4k` and `oogway-1080`
 2. **Docker & Docker Compose** installed on the deployment target
 3. **ntfy.sh topic** created (or use a self-hosted ntfy server)
 4. **Admin password** configured with `ADMIN_PASSWORD`
 5. **Terrarium coordinates** configured with `SUN_LAT` and `SUN_LNG`
 
-### MediaMTX Configuration Example
+### MediaMTX / Wall PC Streaming Example
 
 ```yaml
-oogway:
-  runOnInit: >
-    ffmpeg -f dshow -rtbufsize 250M -i video="c922 Pro Stream Webcam" 
-    -vcodec h264_qsv -profile:v high -bf 0 -s 1920x1080 -b:v 6M -maxrate 6M -bufsize 12M 
-    -preset fast -f rtsp -rtsp_transport tcp rtsp://localhost:$RTSP_PORT/$MTX_PATH
-  runOnInitRestart: yes
+paths:
+  oogway-4k:
+    source: publisher
+  oogway-1080:
+    source: publisher
 ```
 
-This captures from a Logitech C922 Pro Stream Webcam, encodes with H.264 Quick Sync, and outputs RTSP to MediaMTX, which automatically converts to HLS.
+On the Windows wall PC, use FFmpeg to publish both cameras to MediaMTX. For the older EliteBook hardware, the safe target is 1080p for the 4K camera and 720p for the 1080p camera.
+
+You can also use the helper script at `wall-pc/start-dual-stream.ps1` and only change the server and camera names.
+
+```powershell
+ffmpeg -f dshow -rtbufsize 256M -framerate 20 -video_size 1920x1080 -i video="Your 4K Camera Name" -vf scale=1920:1080 -c:v h264_qsv -preset veryfast -profile:v high -bf 0 -g 40 -b:v 3500k -maxrate 4000k -bufsize 8000k -an -f flv rtmp://YOUR_OOGWORLD_SERVER:1935/oogway-4k
+```
+
+```powershell
+ffmpeg -f dshow -rtbufsize 256M -framerate 20 -video_size 1280x720 -i video="Your 1080p Camera Name" -vf scale=1280:720 -c:v h264_qsv -preset veryfast -profile:v high -bf 0 -g 40 -b:v 2000k -maxrate 2500k -bufsize 5000k -an -f flv rtmp://YOUR_OOGWORLD_SERVER:1935/oogway-1080
+```
+
+If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v libx264 -preset veryfast` and lower framerate to `15`.
 
 ## Setup & Run
 
@@ -39,7 +50,12 @@ This captures from a Logitech C922 Pro Stream Webcam, encodes with H.264 Quick S
 
 1. In Portainer, create a new stack and paste the `docker-compose.yml` file
 2. In the **Environment variables** section, add:
-  - `STREAM_URL` → `http://localhost:8554/oogway/index.m3u8` (or wall PC IP if remote)
+  - `STREAM_URL_PRIMARY` → `http://mediamtx:8888/oogway-4k` or `http://mediamtx:8888/oogway-4k/index.m3u8`
+  - `STREAM_URL_SECONDARY` → `http://mediamtx:8888/oogway-1080` or `http://mediamtx:8888/oogway-1080/index.m3u8`
+  - `STREAM_LABEL_PRIMARY` → `Hut Cam`
+  - `STREAM_LABEL_SECONDARY` → `Water Bowl Cam`
+  - `STREAM_RESOLUTION_PRIMARY` → `1080p`
+  - `STREAM_RESOLUTION_SECONDARY` → `720p`
   - `NTFY_TOPIC` → your ntfy topic
   - `TZ` → your timezone (e.g., `America/New_York`)
   - `ADMIN_PASSWORD` → password for admin panel access
@@ -60,7 +76,12 @@ docker compose up --build
 Edit `.env` with your values:
 
 ```env
-STREAM_URL=http://localhost:8554/oogway/index.m3u8
+STREAM_URL_PRIMARY=http://mediamtx:8888/oogway-4k
+STREAM_URL_SECONDARY=http://mediamtx:8888/oogway-1080
+STREAM_LABEL_PRIMARY=Hut Cam
+STREAM_LABEL_SECONDARY=Water Bowl Cam
+STREAM_RESOLUTION_PRIMARY=1080p
+STREAM_RESOLUTION_SECONDARY=720p
 NTFY_TOPIC=your-unique-ntfy-topic
 TZ=UTC
 ADMIN_PASSWORD=change-me
@@ -71,7 +92,7 @@ ACTIVITY_LOG_PATH=/app/activity_log.json
 CHAT_LOG_PATH=/app/chat_log.json
 ```
 
-**Note**: If running OogWorld on a different machine from MediaMTX, replace `localhost` with the IP/hostname of your wall PC.
+**Note**: If running OogWorld on a different machine from MediaMTX, replace `mediamtx` with the IP/hostname that OogWorld can reach.
 
 ### 2. Start Deployment
 
@@ -83,7 +104,12 @@ The app will be available at `http://localhost:4120`.
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-export STREAM_URL="http://localhost:8554/oogway/index.m3u8"
+export STREAM_URL_PRIMARY="http://localhost:8554/oogway-4k"
+export STREAM_URL_SECONDARY="http://localhost:8554/oogway-1080"
+export STREAM_LABEL_PRIMARY="Hut Cam"
+export STREAM_LABEL_SECONDARY="Water Bowl Cam"
+export STREAM_RESOLUTION_PRIMARY="1080p"
+export STREAM_RESOLUTION_SECONDARY="720p"
 export NTFY_TOPIC="your-topic"
 export TZ="UTC"
 export ADMIN_PASSWORD="change-me"
@@ -111,7 +137,8 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 
 ## Features
 
-- **Live Stream**: WebRTC stream embed with same-origin MediaMTX proxy routing
+- **Live Stream**: Same-origin HLS playback via MediaMTX proxy routing
+- **View Switching**: Users can switch between the 4K camera at 1080p and the 1080p camera at 720p
 - **Action Log**: Last 5 actions persisted to JSON, displayed in reverse chronological order
 - **Notifications**: One-click buttons send POST requests to ntfy.sh with action messages
 - **Report Icon Workflow**: Report button is now a dedicated icon beside the video header and opens a compact report window
@@ -162,7 +189,7 @@ The application is designed with extension points for:
 
 ## Troubleshooting
 
-- **Stream not loading**: Verify `STREAM_URL` is accessible from the container. If MediaMTX is on a different machine, use its IP instead of `localhost`.
+- **Stream not loading**: Verify `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` are reachable from the container. If MediaMTX is on a different machine, use its reachable IP or hostname instead of `mediamtx`.
 - **Notifications not sending**: Check that `NTFY_TOPIC` is correctly set and ntfy.sh is reachable from the container.
 - **Activity log not persisting**: Ensure the container has write permissions to the volume or path specified by `ACTIVITY_LOG_PATH`.
 
