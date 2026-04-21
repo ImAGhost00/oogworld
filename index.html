@@ -217,10 +217,20 @@
     }
 
     .video-frame-wrap {
+      position: relative;
+      overflow: hidden;
       width: 100%;
       aspect-ratio: 16 / 9;
       background: #000;
       border-bottom: 1px solid #1f1f1f;
+    }
+
+    .video-frame-wrap video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+      object-fit: contain;
     }
 
     .video-frame-wrap iframe {
@@ -229,6 +239,100 @@
       border: 0;
       object-fit: contain;
       background: #000;
+    }
+
+    .stream-offline-cover {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background:
+        linear-gradient(180deg, rgba(8, 11, 12, 0.68), rgba(8, 11, 12, 0.9)),
+        radial-gradient(circle at 50% 18%, rgba(239, 68, 68, 0.18), transparent 32%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.24s ease;
+    }
+
+    .stream-offline-cover.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .stream-offline-card {
+      width: min(100%, 360px);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 18px;
+      padding: 18px 18px 16px;
+      text-align: center;
+      background: linear-gradient(155deg, rgba(33, 41, 33, 0.95), rgba(14, 19, 15, 0.96));
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
+    }
+
+    .stream-offline-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #fecaca;
+      background: rgba(127, 29, 29, 0.35);
+    }
+
+    .stream-offline-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #ef4444;
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.7);
+    }
+
+    .stream-offline-title {
+      margin-top: 14px;
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff7ed;
+    }
+
+    .stream-offline-body {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #d7cfc4;
+    }
+
+    .stream-offline-detail {
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #fca5a5;
+      word-break: break-word;
+    }
+
+    .stream-offline-action {
+      margin-top: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid rgba(129, 199, 132, 0.5);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #e8f5e9;
+      background: rgba(76, 175, 80, 0.18);
+    }
+
+    .stream-offline-action:hover {
+      background: rgba(76, 175, 80, 0.28);
     }
 
     .video-controls {
@@ -481,7 +585,16 @@
             </div>
           </div>
           <div class="video-frame-wrap">
-            <video id="hls-video" autoplay muted playsinline style="width:100%;height:100%;background:#000;display:block;"></video>
+            <video id="hls-video" autoplay muted playsinline></video>
+            <div id="stream-offline-cover" class="stream-offline-cover">
+              <div class="stream-offline-card">
+                <div class="stream-offline-badge"><span class="stream-offline-dot"></span>Stream Offline</div>
+                <div id="stream-offline-title" class="stream-offline-title">Waiting for live video</div>
+                <div id="stream-offline-body" class="stream-offline-body">This camera is not currently publishing a live stream.</div>
+                <div id="stream-offline-detail" class="stream-offline-detail"></div>
+                <button id="stream-offline-retry" type="button" class="stream-offline-action">Retry Stream</button>
+              </div>
+            </div>
           </div>
           <div class="video-controls">
             <div id="stream-switcher" class="flex flex-1 flex-wrap gap-2"></div>
@@ -686,6 +799,11 @@
         videoSettingsModal: document.getElementById("video-settings-modal"),
         videoAutoplay: document.getElementById("video-autoplay"),
         videoAutoReload: document.getElementById("video-auto-reload"),
+        streamOfflineCover: document.getElementById("stream-offline-cover"),
+        streamOfflineTitle: document.getElementById("stream-offline-title"),
+        streamOfflineBody: document.getElementById("stream-offline-body"),
+        streamOfflineDetail: document.getElementById("stream-offline-detail"),
+        streamOfflineRetry: document.getElementById("stream-offline-retry"),
         adminModal: document.getElementById("admin-modal"),
         adminClose: document.getElementById("admin-close"),
         adminLoginView: document.getElementById("admin-login-view"),
@@ -700,6 +818,56 @@
       };
 
       var reportBannerTimer = null;
+
+      function setStreamOffline(title, body, detail) {
+        el.streamOfflineTitle.textContent = title || "Stream Offline";
+        el.streamOfflineBody.textContent = body || "This camera is not currently publishing a live stream.";
+        el.streamOfflineDetail.textContent = detail || "";
+        el.streamOfflineDetail.style.display = detail ? "block" : "none";
+        el.streamOfflineCover.classList.add("show");
+      }
+
+      function clearStreamOffline() {
+        el.streamOfflineCover.classList.remove("show");
+        el.streamOfflineDetail.textContent = "";
+        el.streamOfflineDetail.style.display = "none";
+      }
+
+      function applyStreamHealthState() {
+        var active = getActiveStreamOption();
+        if (!active) {
+          setStreamOffline("No Stream Configured", "The player does not have a stream source yet.");
+          return false;
+        }
+
+        if (!active.urls || !active.urls.hls) {
+          setStreamOffline("Stream URL Missing", "The selected camera does not have an HLS URL configured.");
+          return false;
+        }
+
+        if (active.upstream && active.upstream.ok === false) {
+          setStreamOffline(
+            active.label + " offline",
+            "OogWorld can reach the app, but this camera is not available from the stream backend.",
+            active.upstream.detail || "Upstream HLS probe failed."
+          );
+          return false;
+        }
+
+        return true;
+      }
+
+      function mergeHealthIntoStreams(health) {
+        state.streamOptions = Array.isArray(health.streamOptions) ? health.streamOptions : [];
+        if (!state.streamOptions.length && health.streams && health.streams.hls) {
+          state.streamOptions = [{
+            key: "primary",
+            label: "Oogway Cam",
+            resolution: "Live",
+            urls: health.streams,
+          }];
+        }
+      }
 
       function escHtml(s) {
         return String(s)
@@ -893,6 +1061,8 @@
         state.streams = active ? (active.urls || {}) : {};
         renderStreamSwitcher();
 
+        applyStreamHealthState();
+
         if (forceReload) {
           setWebRtcSource(true);
         }
@@ -919,9 +1089,24 @@
 
       var _hlsInstance = null;
 
-      function setWebRtcSource(forceReload) {
+      async function setWebRtcSource(forceReload) {
+        if (forceReload) {
+          var refreshedHealth = await loadHealth();
+          if (refreshedHealth) {
+            mergeHealthIntoStreams(refreshedHealth);
+          }
+        }
+
+        renderStreamSwitcher();
         var src = state.streams.hls || "";
-        if (!src) return;
+        if (!applyStreamHealthState()) {
+          return;
+        }
+
+        if (!src) {
+          setStreamOffline("Stream URL Missing", "The selected camera does not have an HLS URL configured.");
+          return;
+        }
 
         if (_hlsInstance) {
           _hlsInstance.destroy();
@@ -929,6 +1114,10 @@
         }
 
         var video = el.hlsVideo;
+        video.removeAttribute("src");
+        video.load();
+        clearStreamOffline();
+
         if (Hls.isSupported()) {
           var hls = new Hls({
             lowLatencyMode: false,
@@ -945,22 +1134,36 @@
           hls.on(Hls.Events.ERROR, function (_evt, data) {
             if (!data || !data.fatal) return;
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              hls.startLoad();
+              setStreamOffline("Stream Offline", "The stream backend did not return a usable live playlist.", data.details || "Network error while loading HLS.");
+              if (videoPrefs.autoReload) {
+                setTimeout(function () {
+                  setWebRtcSource(true);
+                }, 2000);
+              }
               return;
             }
             if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              setStreamOffline("Playback Error", "The stream loaded but the browser could not continue playback.", data.details || "Media decoding error.");
               hls.recoverMediaError();
               return;
             }
             hls.destroy();
             _hlsInstance = null;
-            setTimeout(function () {
-              setWebRtcSource(true);
-            }, 2000);
+            setStreamOffline("Stream Error", "The live player hit a fatal error.", data.details || "Unknown HLS error.");
+            if (videoPrefs.autoReload) {
+              setTimeout(function () {
+                setWebRtcSource(true);
+              }, 2000);
+            }
           });
 
           hls.on(Hls.Events.MANIFEST_PARSED, function () {
+            clearStreamOffline();
             if (videoPrefs.autoplay) video.play().catch(function () {});
+          });
+
+          hls.on(Hls.Events.LEVEL_LOADED, function () {
+            clearStreamOffline();
           });
 
           hls.on(Hls.Events.LEVEL_UPDATED, function (_evt, data) {
@@ -975,6 +1178,8 @@
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
           video.src = src;
           if (videoPrefs.autoplay) video.play().catch(function () {});
+        } else {
+          setStreamOffline("Browser Unsupported", "This browser cannot play the HLS stream directly.");
         }
       }
 
@@ -1348,15 +1553,7 @@
           return;
         }
 
-        state.streamOptions = Array.isArray(health.streamOptions) ? health.streamOptions : [];
-        if (!state.streamOptions.length && health.streams && health.streams.hls) {
-          state.streamOptions = [{
-            key: "primary",
-            label: "Oogway Cam",
-            resolution: "Live",
-            urls: health.streams,
-          }];
-        }
+        mergeHealthIntoStreams(health);
 
         if (!state.streamOptions.length) {
           alert("Stream not configured. Check STREAM_URL_PRIMARY or STREAM_URL.");
@@ -1435,6 +1632,16 @@
       });
       el.videoSwitchBtn.addEventListener("click", switchToNextStream);
       el.videoPopoutBtn.addEventListener("click", openPlayerTab);
+      el.streamOfflineRetry.addEventListener("click", function () {
+        setWebRtcSource(true);
+      });
+
+      el.hlsVideo.addEventListener("playing", clearStreamOffline);
+      el.hlsVideo.addEventListener("loadeddata", clearStreamOffline);
+      el.hlsVideo.addEventListener("canplay", clearStreamOffline);
+      el.hlsVideo.addEventListener("error", function () {
+        setStreamOffline("Playback Error", "The browser could not play the selected live stream.");
+      });
 
       el.chatSettingsBtn.addEventListener("click", openChatSettings);
       el.chatSettingsClose.addEventListener("click", closeChatSettings);

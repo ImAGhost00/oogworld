@@ -198,6 +198,17 @@ def get_stream_origin(base: str) -> str:
     return f"{scheme}://{parsed.hostname}"
 
 
+def build_upstream_url(base: str, mode: str, stream_path: str, query: str = "") -> str:
+    origin = get_stream_origin(base)
+    if not origin:
+        return ""
+    upstream_port = 8889 if mode == "webrtc" else 8888
+    upstream_url = f"{origin}:{upstream_port}/{stream_path}"
+    if query:
+        upstream_url += f"?{query}"
+    return upstream_url
+
+
 async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Response:
     if mode not in {"webrtc", "hls"}:
         raise HTTPException(status_code=404, detail="Unknown stream mode")
@@ -205,15 +216,9 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
     if not stream:
         raise HTTPException(status_code=503, detail="Stream path is not configured")
 
-    origin = get_stream_origin(stream["base"])
-    if not origin:
+    upstream_url = build_upstream_url(stream["base"], mode, stream_path, request.url.query)
+    if not upstream_url:
         raise HTTPException(status_code=500, detail="Configured stream URL is invalid")
-
-    upstream_port = 8889 if mode == "webrtc" else 8888
-    query = request.url.query
-    upstream_url = f"{origin}:{upstream_port}/{stream_path}"
-    if query:
-        upstream_url += f"?{query}"
 
     fwd_headers = {
         "Accept": request.headers.get("accept", "*/*"),
@@ -229,13 +234,20 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
     is_playlist = stream_path.endswith(".m3u8") or stream_path.endswith(".m3u")
 
     client = httpx.AsyncClient(timeout=30.0, follow_redirects=True)
-    upstream_req = client.build_request(
-        request.method,
-        upstream_url,
-        headers=fwd_headers,
-        content=body if body else None,
-    )
-    upstream = await client.send(upstream_req, stream=True)
+    try:
+        upstream_req = client.build_request(
+            request.method,
+            upstream_url,
+            headers=fwd_headers,
+            content=body if body else None,
+        )
+        upstream = await client.send(upstream_req, stream=True)
+    except httpx.HTTPError as exc:
+        await client.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unable to reach upstream stream service for {stream['label']}: {exc}",
+        ) from exc
 
     passthrough: dict[str, str] = {}
     for key in [
@@ -272,6 +284,23 @@ async def proxy_mediastream(mode: str, stream_path: str, request: Request) -> Re
         status_code=upstream.status_code,
         headers=passthrough,
     )
+
+
+async def probe_stream_upstream(stream: dict[str, Any]) -> dict[str, Any]:
+    hls_url = build_upstream_url(stream["base"], "hls", f"{stream['path']}/index.m3u8")
+    if not hls_url:
+        return {"ok": False, "status": None, "detail": "invalid upstream url"}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            response = await client.get(hls_url)
+        return {
+            "ok": response.status_code < 400,
+            "status": response.status_code,
+            "detail": "ok" if response.status_code < 400 else response.text[:200],
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "status": None, "detail": str(exc)}
 
 
 def ensure_list_file(path: Path) -> None:
@@ -527,8 +556,12 @@ async def media_proxy(mode: str, stream_path: str, request: Request) -> Response
 
 
 @app.get("/api/health")
-def health() -> dict[str, Any]:
+async def health() -> dict[str, Any]:
     streams = get_configured_streams()
+    upstream_checks: dict[str, Any] = {}
+    for stream in streams:
+        upstream_checks[stream["key"]] = await probe_stream_upstream(stream)
+
     return {
         "status": "ok",
         "version": APP_VERSION,
@@ -543,6 +576,7 @@ def health() -> dict[str, Any]:
                 "label": stream["label"],
                 "resolution": stream["resolution"],
                 "urls": stream["urls"],
+                "upstream": upstream_checks.get(stream["key"], {}),
             }
             for stream in streams
         ],
