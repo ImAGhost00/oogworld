@@ -72,7 +72,7 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `OOGWAY_BRAIN_MODEL` → model id (default `meta-llama/llama-4-scout-17b-16e-instruct`)
   - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
   - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
-  - `OOGWAY_BRAIN_CAMERA_KEY` → `primary` or `secondary` camera for vision snapshots
+  - `OOGWAY_BRAIN_CAMERA_KEY` → `both` (recommended), `primary`, or `secondary` for vision snapshots
   - `OOGWAY_BRAIN_MEMORY_PATH` → persisted memory file path (`/app/brain_memory.json`)
 3. Deploy the stack
 
@@ -106,7 +106,7 @@ GROQ_API_KEY=replace-with-groq-key
 OOGWAY_BRAIN_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 OOGWAY_BRAIN_INTERVAL_SECONDS=300
 OOGWAY_BRAIN_MENTION_TRIGGER=@oogway
-OOGWAY_BRAIN_CAMERA_KEY=primary
+OOGWAY_BRAIN_CAMERA_KEY=both
 OOGWAY_BRAIN_MEMORY_PATH=/app/brain_memory.json
 ```
 

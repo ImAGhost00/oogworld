@@ -49,7 +49,7 @@ OOGWAY_BRAIN_PERSONALITY = os.getenv(
 )
 OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(os.getenv("OOGWAY_BRAIN_INTERVAL_SECONDS", "300")))
 OOGWAY_BRAIN_MENTION_TRIGGER = os.getenv("OOGWAY_BRAIN_MENTION_TRIGGER", "@oogway")
-OOGWAY_BRAIN_CAMERA_KEY = os.getenv("OOGWAY_BRAIN_CAMERA_KEY", "primary")
+OOGWAY_BRAIN_CAMERA_KEY = os.getenv("OOGWAY_BRAIN_CAMERA_KEY", "both")
 OOGWAY_BRAIN_MEMORY_PATH = Path(os.getenv("OOGWAY_BRAIN_MEMORY_PATH", BASE_DIR / "brain_memory.json"))
 OOGWAY_BRAIN_MEMORY_CAP = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_CAP", "300")))
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
@@ -429,19 +429,30 @@ def is_brain_configured() -> bool:
     return bool(GROQ_API_KEY)
 
 
-def stream_for_key(key: str) -> dict[str, Any] | None:
+def get_brain_snapshot_targets() -> list[dict[str, str]]:
     streams = get_configured_streams()
-    for stream in streams:
-        if stream["key"] == key:
-            return stream
-    return streams[0] if streams else None
+    if not streams:
+        return []
 
+    camera_key = (OOGWAY_BRAIN_CAMERA_KEY or "both").strip().lower()
+    if camera_key in {"both", "all", "*"}:
+        selected = streams
+    else:
+        selected_stream = next((stream for stream in streams if stream["key"] == camera_key), None)
+        selected = [selected_stream] if selected_stream else [streams[0]]
 
-def get_brain_snapshot_hls_url() -> str:
-    stream = stream_for_key(OOGWAY_BRAIN_CAMERA_KEY)
-    if not stream:
-        return ""
-    return build_upstream_url(stream["base"], "hls", f"{stream['path']}/index.m3u8")
+    targets: list[dict[str, str]] = []
+    for stream in selected:
+        hls_url = build_upstream_url(stream["base"], "hls", f"{stream['path']}/index.m3u8")
+        if hls_url:
+            targets.append(
+                {
+                    "key": stream["key"],
+                    "label": stream["label"],
+                    "hlsUrl": hls_url,
+                }
+            )
+    return targets
 
 
 def build_chat_item(username: str, username_color: str, text: str, kind: str = "chat") -> dict[str, Any]:
@@ -490,6 +501,31 @@ async def capture_stream_snapshot_data_url(hls_url: str) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
+    targets = get_brain_snapshot_targets()
+    if not targets:
+        return []
+
+    captures = await asyncio.gather(
+        *(capture_stream_snapshot_data_url(target["hlsUrl"]) for target in targets),
+        return_exceptions=True,
+    )
+
+    snapshots: list[dict[str, str]] = []
+    for target, capture_result in zip(targets, captures):
+        if isinstance(capture_result, Exception):
+            continue
+        if capture_result:
+            snapshots.append(
+                {
+                    "key": target["key"],
+                    "label": target["label"],
+                    "dataUrl": capture_result,
+                }
+            )
+    return snapshots
+
+
 def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> str:
     recents = read_chat_log()[-OOGWAY_BRAIN_CONTEXT_CHAT_CAP:]
     memory = read_brain_memory()[-14:]
@@ -520,10 +556,19 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> 
         )
         mention_line = "No direct mention in this turn."
 
+    camera_targets = get_brain_snapshot_targets()
+    camera_labels = ", ".join(target["label"] for target in camera_targets) or "(none configured)"
+
     return "\n".join(
         [
             trigger_text,
             mention_line,
+            f"Camera coverage this turn: {camera_labels}",
+            "",
+            "Vision priorities:",
+            "- Watch for movement: poking head out, walking, changing position, active vs resting.",
+            "- Watch care events: fresh food added, water bowl refill, visible eating or drinking.",
+            "- If uncertain, say so briefly instead of making up details.",
             "",
             "Recent chat:",
             "\n".join(recent_lines[-12:]) or "(none)",
@@ -536,16 +581,18 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> 
     )
 
 
-async def call_groq_for_oogway(prompt_text: str, snapshot_data_url: str) -> str:
+async def call_groq_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
     system_prompt = (
         f"{OOGWAY_BRAIN_PERSONALITY} "
         "You are in the OogWorld live chat. Be warm, brief, and grounded in current context. "
-        "You slowly develop memory and relationships over time."
+        "You slowly develop memory and relationships over time. "
+        "When images are provided, treat them as current camera views and prioritize concrete visual observations."
     )
 
     user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text}]
-    if snapshot_data_url:
-        user_content.append({"type": "image_url", "image_url": {"url": snapshot_data_url}})
+    for snapshot in snapshots:
+        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
+        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
 
     payload = {
         "model": OOGWAY_BRAIN_MODEL,
@@ -633,8 +680,8 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
                 return
 
         prompt_text = build_oogway_prompt(trigger, source_message)
-        snapshot_data_url = await capture_stream_snapshot_data_url(get_brain_snapshot_hls_url())
-        reply = await call_groq_for_oogway(prompt_text, snapshot_data_url)
+        snapshots = await capture_brain_snapshots_data_urls()
+        reply = await call_groq_for_oogway(prompt_text, snapshots)
         if not reply:
             return
 
@@ -890,12 +937,14 @@ def get_reports() -> dict[str, dict[str, Any]]:
 
 @app.get("/api/brain/status")
 def brain_status() -> dict[str, Any]:
+    targets = get_brain_snapshot_targets()
     return {
         "enabled": OOGWAY_BRAIN_ENABLED,
         "configured": is_brain_configured(),
         "name": OOGWAY_BRAIN_NAME,
         "model": OOGWAY_BRAIN_MODEL,
         "cameraKey": OOGWAY_BRAIN_CAMERA_KEY,
+        "cameraTargets": [{"key": t["key"], "label": t["label"]} for t in targets],
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
         "awake": brain_awake_now(),
         "memoryItems": len(read_brain_memory()),
