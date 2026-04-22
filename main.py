@@ -44,7 +44,6 @@ OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower(
     "on",
 }
 OOGWAY_BRAIN_NAME = os.getenv("OOGWAY_BRAIN_NAME", "Oogway")
-OOGWAY_BRAIN_PROVIDER = os.getenv("OOGWAY_BRAIN_PROVIDER", "ollama").strip().lower()
 OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "qwen2.5:3b").strip() or "qwen2.5:3b"
 OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip() or "http://ollama:11434"
 OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip() or OOGWAY_BRAIN_MODEL
@@ -93,11 +92,7 @@ OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
 )
 OOGWAY_OBSIDIAN_VAULT_PATH = Path(os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", BASE_DIR / "obsidian"))
 OOGWAY_OBSIDIAN_MEMORY_FOLDER = os.getenv("OOGWAY_OBSIDIAN_MEMORY_FOLDER", "Oogway Memory").strip() or "Oogway Memory"
-OOGWAY_BRAIN_MEMORY_PATH = Path(os.getenv("OOGWAY_BRAIN_MEMORY_PATH", BASE_DIR / "brain_memory.json"))
-OOGWAY_BRAIN_MEMORY_CAP = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_CAP", "300")))
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
 OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
 
 _MEMORY_STOPWORDS = {
@@ -428,11 +423,6 @@ def write_list_file(path: Path, items: list[dict[str, Any]], cap: int) -> None:
     path.write_text(json.dumps(items[-cap:], indent=2), encoding="utf-8")
 
 
-def brain_provider() -> str:
-    provider = (OOGWAY_BRAIN_PROVIDER or "ollama").strip().lower()
-    return provider if provider in {"ollama", "groq"} else "ollama"
-
-
 def ensure_obsidian_memory_dir() -> Path:
     directory = OOGWAY_OBSIDIAN_VAULT_PATH / OOGWAY_OBSIDIAN_MEMORY_FOLDER
     directory.mkdir(parents=True, exist_ok=True)
@@ -576,17 +566,44 @@ def append_chat_log(item: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
-def read_brain_memory() -> list[dict[str, Any]]:
-    return read_list_file(OOGWAY_BRAIN_MEMORY_PATH, cap=OOGWAY_BRAIN_MEMORY_CAP)
-
-
-def append_brain_memory(item: dict[str, Any]) -> dict[str, Any]:
-    entries = read_brain_memory()
-    entries.append(item)
-    write_list_file(OOGWAY_BRAIN_MEMORY_PATH, entries, cap=OOGWAY_BRAIN_MEMORY_CAP)
+def remember_memory_event(topic: str, note: str, trigger: str = "event", ts: str | None = None) -> None:
+    payload = {
+        "ts": ts or datetime.now(timezone.utc).isoformat(),
+        "topic": topic,
+        "note": note,
+        "trigger": trigger,
+    }
     with suppress(Exception):
-        write_obsidian_memory_note(item)
-    return item
+        write_obsidian_memory_note(payload)
+
+
+def read_recent_obsidian_memories(limit: int = 18) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for note_path in list_obsidian_memory_notes()[:max(1, limit)]:
+        try:
+            content = note_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        ts = ""
+        topic = "memory"
+        note = ""
+        in_memory_section = False
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+            if line.startswith("- ts:"):
+                ts = line.split(":", 1)[1].strip()
+            elif line.startswith("- topic:"):
+                topic = line.split(":", 1)[1].strip() or "memory"
+            elif line == "## Memory":
+                in_memory_section = True
+            elif in_memory_section and line:
+                note = line
+                break
+
+        if note:
+            entries.append({"ts": ts, "topic": topic, "note": note})
+    return entries
 
 
 def canonical_username(raw: str | None) -> str:
@@ -642,9 +659,6 @@ async def send_ntfy_message(
 
 
 def is_brain_configured() -> bool:
-    provider = brain_provider()
-    if provider == "groq":
-        return bool(GROQ_API_KEY)
     return bool(OOGWAY_OLLAMA_BASE and OOGWAY_OLLAMA_MODEL)
 
 
@@ -821,7 +835,7 @@ async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
 
 def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> str:
     recents = read_chat_log()[-OOGWAY_BRAIN_CONTEXT_CHAT_CAP:]
-    memory = read_brain_memory()[-14:]
+    memory = read_recent_obsidian_memories(limit=14)
     recent_lines = [
         f"[{msg.get('ts', '')}] {msg.get('username', 'Anonymous')}: {msg.get('text', '')}"
         for msg in recents
@@ -914,82 +928,37 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
         if encoded:
             image_payload.append(encoded)
 
-    model_name = OOGWAY_OLLAMA_VISION_MODEL if (image_payload and OOGWAY_OLLAMA_VISION_MODEL) else OOGWAY_OLLAMA_MODEL
-    user_msg: dict[str, Any] = {"role": "user", "content": prompt_text}
-    if image_payload and OOGWAY_OLLAMA_VISION_MODEL:
-        user_msg["images"] = image_payload
-
-    payload = {
-        "model": model_name,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            user_msg,
-        ],
-        "options": {"temperature": 0.7, "num_predict": 160},
-    }
-
-    try:
+    async def _chat_with(model_name: str, include_images: bool) -> str:
+        user_msg: dict[str, Any] = {"role": "user", "content": prompt_text}
+        if include_images:
+            user_msg["images"] = image_payload
+        payload = {
+            "model": model_name,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                user_msg,
+            ],
+            "options": {"temperature": 0.7, "num_predict": 160},
+        }
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             return ""
         data = resp.json()
-        content = data.get("message", {}).get("content", "")
-        return str(content).strip()[:240]
+        return str(data.get("message", {}).get("content", "")).strip()[:240]
+
+    # Prefer vision model when images exist, then gracefully fall back to text model.
+    if image_payload and OOGWAY_OLLAMA_VISION_MODEL:
+        with suppress(Exception):
+            reply = await _chat_with(OOGWAY_OLLAMA_VISION_MODEL, include_images=True)
+            if reply:
+                return reply
+
+    try:
+        return await _chat_with(OOGWAY_OLLAMA_MODEL, include_images=False)
     except Exception:
         return ""
-
-
-async def call_groq_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
-    system_prompt = (
-        f"{OOGWAY_BRAIN_PERSONALITY} "
-        "You are in the OogWorld live chat. Be warm, brief, and grounded in current context. "
-        "You slowly develop memory and relationships over time. "
-        "When images are provided, treat them as current camera views and prioritize concrete visual observations."
-    )
-
-    user_content: list[dict[str, Any]] = [{"type": "text", "text": prompt_text}]
-    for snapshot in snapshots:
-        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
-        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
-
-    payload = {
-        "model": OOGWAY_BRAIN_MODEL,
-        "temperature": 0.7,
-        "max_tokens": 140,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    }
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(f"{GROQ_API_BASE.rstrip('/')}/chat/completions", json=payload, headers=headers)
-    if resp.status_code >= 400:
-        return ""
-
-    data = resp.json()
-    content = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    if isinstance(content, list):
-        parts = [str(part.get("text", "")) for part in content if isinstance(part, dict)]
-        content = " ".join(parts)
-    return str(content).strip()[:240]
-
-
-async def call_oogway_brain_model(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
-    if brain_provider() == "groq":
-        return await call_groq_for_oogway(prompt_text, snapshots)
-    return await call_ollama_for_oogway(prompt_text, snapshots)
 
 
 async def vision_json_classify(
@@ -1001,46 +970,6 @@ async def vision_json_classify(
     defaults = {key: False for key in keys}
     if not snapshots:
         return defaults
-
-    provider = brain_provider()
-    if provider == "groq":
-        if not GROQ_API_KEY:
-            return defaults
-        user_content: list[dict[str, Any]] = [{"type": "text", "text": task_prompt}]
-        for snapshot in snapshots:
-            user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
-            user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
-
-        payload = {
-            "model": OOGWAY_BRAIN_MODEL,
-            "temperature": 0.1,
-            "max_tokens": 120,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-        }
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
-            if resp.status_code >= 400:
-                return defaults
-            content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-            parsed = _parse_json_from_text(str(content))
-            if not parsed:
-                return defaults
-            return {key: bool(parsed.get(key, False)) for key in keys}
-        except Exception:
-            return defaults
 
     if not OOGWAY_OLLAMA_VISION_MODEL:
         return defaults
@@ -1168,6 +1097,12 @@ async def run_brain_eating_check() -> None:
     )
     append_chat_log(msg)
     await broadcast_chat(msg)
+    remember_memory_event(
+        topic="watering" if result.get("drinking") else "feeding",
+        note=f"Observed {'drinking' if result.get('drinking') else 'eating'} in camera view. Oogway said: {reaction}",
+        trigger="vision-behavior",
+        ts=msg["ts"],
+    )
     now = now_utc()
     LAST_EATING_REACT_AT = now
     LAST_BRAIN_SPOKE_AT = now
@@ -1250,6 +1185,12 @@ async def emit_oogway_care_alert(kind: Literal["food", "water"], reminder: bool 
     }
     append_chat_log(chat_item)
     await broadcast_chat(chat_item)
+    remember_memory_event(
+        topic=f"care-{kind}",
+        note=f"Oogway care alert ({'reminder' if reminder else 'new'}): {chat_text}",
+        trigger="care-alert",
+        ts=now_iso,
+    )
 
     if OOGWAY_TEXTS_TOPIC:
         with suppress(Exception):
@@ -1315,13 +1256,10 @@ def remember_interaction(trigger: str, source_message: dict[str, Any] | None, re
     elif trigger == "mention":
         topic = "human-chat"
 
-    append_brain_memory(
-        {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "topic": topic,
-            "note": f"{(source_message or {}).get('username', 'Someone')}: {source_text[:140]} | Oogway: {reply_text[:140]}",
-            "trigger": trigger,
-        }
+    remember_memory_event(
+        topic=topic,
+        note=f"{(source_message or {}).get('username', 'Someone')}: {source_text[:140]} | Oogway: {reply_text[:140]}",
+        trigger=trigger,
     )
 
 
@@ -1361,7 +1299,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 
         prompt_text = build_oogway_prompt(trigger, source_message)
         snapshots = await capture_brain_snapshots_data_urls()
-        reply = await call_oogway_brain_model(prompt_text, snapshots)
+        reply = await call_ollama_for_oogway(prompt_text, snapshots)
         if not reply:
             return
 
@@ -1537,7 +1475,7 @@ async def daylight_refresh_loop() -> None:
 async def startup() -> None:
     ensure_list_file(ACTION_LOG_PATH)
     ensure_list_file(CHAT_LOG_PATH)
-    ensure_list_file(OOGWAY_BRAIN_MEMORY_PATH)
+    ensure_obsidian_memory_dir()
     await refresh_daylight_cache(force=True)
     global DAYLIGHT_TASK, BRAIN_TASK
     DAYLIGHT_TASK = asyncio.create_task(daylight_refresh_loop())
@@ -1646,7 +1584,7 @@ def brain_status() -> dict[str, Any]:
         "lastMovementAt": LAST_BRAIN_MOVEMENT_AT.isoformat() if LAST_BRAIN_MOVEMENT_AT else "",
         "movementAgeSeconds": movement_age_seconds,
         "awake": brain_awake_now(),
-        "memoryItems": len(read_brain_memory()),
+        "memoryItems": len(list_obsidian_memory_notes()),
         "lastSpokeAt": LAST_BRAIN_SPOKE_AT.isoformat() if LAST_BRAIN_SPOKE_AT else "",
     }
 
@@ -1746,6 +1684,12 @@ async def chat_ws(
             }
             append_chat_log(msg)
             await broadcast_chat(msg)
+            remember_memory_event(
+                topic="chat",
+                note=f"{safe_name}: {text[:180]}",
+                trigger="chat-message",
+                ts=msg["ts"],
+            )
 
             is_self = safe_name.lower() == OOGWAY_BRAIN_NAME.lower()
             if OOGWAY_BRAIN_ENABLED and is_brain_configured() and (not is_self) and should_trigger_oogway_mention(text):
@@ -1778,6 +1722,13 @@ async def trigger_action(payload: ActionRequest, request: Request) -> dict[str, 
         }
         append_chat_log(chat_item)
         await broadcast_chat(chat_item)
+        memory_topic = "feeding" if action == "Request Food" else "watering"
+        remember_memory_event(
+            topic=memory_topic,
+            note=f"{actor} triggered action: {action}",
+            trigger="manual-action",
+            ts=chat_item["ts"],
+        )
     except HTTPException:
         append_action_log(action, "failed")
         raise
@@ -1834,6 +1785,12 @@ async def toggle_report(payload: ReportToggleRequest, request: Request) -> dict[
     append_chat_log(chat_item)
     await broadcast_chat(chat_item)
     await send_ntfy_message(NTFY_TOPIC, notify_text)
+    remember_memory_event(
+        topic=f"report-{payload.kind}",
+        note=f"{actor} set report {payload.kind} active={payload.active}",
+        trigger="report-toggle",
+        ts=now,
+    )
 
     return {
         "ok": True,

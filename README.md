@@ -20,7 +20,7 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 4. **Admin password** configured with `ADMIN_PASSWORD`
 5. **Terrarium coordinates** configured with `SUN_LAT` and `SUN_LNG`
 6. **Ollama models** are pulled automatically by Compose (`qwen2.5:3b` and `moondream:latest` by default)
-7. **Groq API key** is optional and only needed when `OOGWAY_BRAIN_PROVIDER=groq`
+7. **Syncthing or Obsidian app** on your client devices if you want vault sync across devices
 
 ### MediaMTX / Wall PC Streaming Example
 
@@ -70,7 +70,6 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `ACTIVITY_LOG_PATH` → `/app/activity_log.json` (leave as default)
   - `CHAT_LOG_PATH` → `/app/chat_log.json` (leave as default)
   - `OOGWAY_BRAIN_ENABLED` → `true` to enable Oogway AI brain
-  - `OOGWAY_BRAIN_PROVIDER` → `ollama` (default) or `groq`
   - `OOGWAY_BRAIN_MODEL` → local chat model id (default `qwen2.5:3b`)
   - `OOGWAY_OLLAMA_BASE` → Ollama API base URL (default `http://ollama:11434` inside Compose)
   - `OOGWAY_OLLAMA_MODEL` → Ollama model used for chat responses
@@ -79,7 +78,6 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `OOGWAY_OBSIDIAN_MEMORY_FOLDER` → folder inside vault for Oogway notes
   - `HOST_OBSIDIAN_VAULT_PATH` → host folder mounted into OogWorld and Syncthing (default `./obsidian-vault`)
   - `SYNCTHING_PUID` / `SYNCTHING_PGID` → Linux user/group IDs for file ownership (default `1000`)
-  - `GROQ_API_KEY` → optional fallback API key when provider is set to `groq`
   - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
   - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
   - `OOGWAY_BRAIN_CAMERA_KEY` → `both` (recommended), `primary`, or `secondary` for vision snapshots
@@ -89,7 +87,7 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `OOGWAY_TEXTS_TOPIC` → ntfy topic for Oogway text-style messages (default `oogworldtexts`)
   - `OOGWAY_TEXTS_STYLE` → `auto`, `nice`, or `angry` tone for Oogway text notifications
   - `OOGWAY_TEXTS_ANGER_AFTER_SECONDS` → in `auto`, unresolved care need age before angry texts (default `14400`)
-  - `OOGWAY_BRAIN_MEMORY_PATH` → persisted memory file path (`/app/brain_memory.json`)
+  - `OOGWAY_BRAIN_CONTEXT_CHAT_CAP` → how much recent chat to include in prompts (default `24`)
 3. Deploy the stack
 
 #### With Docker CLI
@@ -120,7 +118,6 @@ BEDTIME_SOON_MINUTES=90
 ACTIVITY_LOG_PATH=/app/activity_log.json
 CHAT_LOG_PATH=/app/chat_log.json
 OOGWAY_BRAIN_ENABLED=true
-OOGWAY_BRAIN_PROVIDER=ollama
 OOGWAY_BRAIN_MODEL=qwen2.5:3b
 OOGWAY_OLLAMA_BASE=http://ollama:11434
 OOGWAY_OLLAMA_MODEL=qwen2.5:3b
@@ -134,10 +131,8 @@ OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS=3600
 OOGWAY_TEXTS_TOPIC=oogworldtexts
 OOGWAY_TEXTS_STYLE=auto
 OOGWAY_TEXTS_ANGER_AFTER_SECONDS=14400
-OOGWAY_BRAIN_MEMORY_PATH=/app/brain_memory.json
 OOGWAY_OBSIDIAN_VAULT_PATH=/app/obsidian
 OOGWAY_OBSIDIAN_MEMORY_FOLDER=Oogway Memory
-GROQ_API_KEY=
 HOST_OBSIDIAN_VAULT_PATH=./obsidian-vault
 SYNCTHING_PUID=1000
 SYNCTHING_PGID=1000
@@ -155,7 +150,7 @@ Syncthing is included in `docker-compose.yml` and shares the same vault folder t
 4. Pair your other device(s) and accept the folder.
 5. On each client, open that synced folder as an Obsidian vault.
 
-Only use one sync method per vault (Syncthing OR Obsidian Sync) to avoid conflicts.
+Only use one sync method per vault to avoid conflicts.
 
 **Note**: In this deployment, OogWorld runs on `10.0.0.55` and MediaMTX runs on the Windows Wall PC at `10.0.0.104`. If that Wall PC IP changes, update `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` to the new reachable IP or hostname.
 
