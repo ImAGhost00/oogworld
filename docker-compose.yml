@@ -1,13 +1,4 @@
 services:
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: oogworld-frontend
-    ports:
-      - "4121:3000"
-    restart: unless-stopped
-
   oogworld:
     build: .
     container_name: oogworld
