@@ -8,7 +8,8 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 - **Frontend**: Responsive SPA with Tailwind CSS, HLS.js video player
 - **Stream Source**: MediaMTX RTSP-to-HLS gateway
 - **Notifications**: ntfy.sh webhook integration
-- **AI Brain**: Groq vision-enabled chat agent (Oogway)
+- **AI Brain**: Local Ollama chat + vision models (Oogway)
+- **Memory**: Obsidian-compatible markdown vault notes with wiki-links
 - **Deployment**: Docker Compose
 
 ## Prerequisites
@@ -18,7 +19,8 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 3. **ntfy.sh topic** created (or use a self-hosted ntfy server)
 4. **Admin password** configured with `ADMIN_PASSWORD`
 5. **Terrarium coordinates** configured with `SUN_LAT` and `SUN_LNG`
-6. **Groq API key** (only when enabling Oogway brain) configured with `GROQ_API_KEY`
+6. **Ollama models** are pulled automatically by Compose (`qwen2.5:3b` and `moondream:latest` by default)
+7. **Groq API key** is optional and only needed when `OOGWAY_BRAIN_PROVIDER=groq`
 
 ### MediaMTX / Wall PC Streaming Example
 
@@ -68,8 +70,16 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `ACTIVITY_LOG_PATH` → `/app/activity_log.json` (leave as default)
   - `CHAT_LOG_PATH` → `/app/chat_log.json` (leave as default)
   - `OOGWAY_BRAIN_ENABLED` → `true` to enable Oogway AI brain
-  - `GROQ_API_KEY` → Groq API key used for chat + camera vision
-  - `OOGWAY_BRAIN_MODEL` → model id (default `meta-llama/llama-4-scout-17b-16e-instruct`)
+  - `OOGWAY_BRAIN_PROVIDER` → `ollama` (default) or `groq`
+  - `OOGWAY_BRAIN_MODEL` → local chat model id (default `qwen2.5:3b`)
+  - `OOGWAY_OLLAMA_BASE` → Ollama API base URL (default `http://ollama:11434` inside Compose)
+  - `OOGWAY_OLLAMA_MODEL` → Ollama model used for chat responses
+  - `OOGWAY_OLLAMA_VISION_MODEL` → Ollama vision model for bowl/eating checks (default `moondream:latest`)
+  - `OOGWAY_OBSIDIAN_VAULT_PATH` → path to your Obsidian vault root
+  - `OOGWAY_OBSIDIAN_MEMORY_FOLDER` → folder inside vault for Oogway notes
+  - `HOST_OBSIDIAN_VAULT_PATH` → host folder mounted into OogWorld and Syncthing (default `./obsidian-vault`)
+  - `SYNCTHING_PUID` / `SYNCTHING_PGID` → Linux user/group IDs for file ownership (default `1000`)
+  - `GROQ_API_KEY` → optional fallback API key when provider is set to `groq`
   - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
   - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
   - `OOGWAY_BRAIN_CAMERA_KEY` → `both` (recommended), `primary`, or `secondary` for vision snapshots
@@ -90,6 +100,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
+First startup can take a few minutes while `ollama-model-init` pulls the chat and vision models.
+
 Edit `.env` with your values:
 
 ```env
@@ -108,8 +120,11 @@ BEDTIME_SOON_MINUTES=90
 ACTIVITY_LOG_PATH=/app/activity_log.json
 CHAT_LOG_PATH=/app/chat_log.json
 OOGWAY_BRAIN_ENABLED=true
-GROQ_API_KEY=replace-with-groq-key
-OOGWAY_BRAIN_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+OOGWAY_BRAIN_PROVIDER=ollama
+OOGWAY_BRAIN_MODEL=qwen2.5:3b
+OOGWAY_OLLAMA_BASE=http://ollama:11434
+OOGWAY_OLLAMA_MODEL=qwen2.5:3b
+OOGWAY_OLLAMA_VISION_MODEL=moondream:latest
 OOGWAY_BRAIN_INTERVAL_SECONDS=300
 OOGWAY_BRAIN_MENTION_TRIGGER=@oogway
 OOGWAY_BRAIN_CAMERA_KEY=both
@@ -120,7 +135,27 @@ OOGWAY_TEXTS_TOPIC=oogworldtexts
 OOGWAY_TEXTS_STYLE=auto
 OOGWAY_TEXTS_ANGER_AFTER_SECONDS=14400
 OOGWAY_BRAIN_MEMORY_PATH=/app/brain_memory.json
+OOGWAY_OBSIDIAN_VAULT_PATH=/app/obsidian
+OOGWAY_OBSIDIAN_MEMORY_FOLDER=Oogway Memory
+GROQ_API_KEY=
+HOST_OBSIDIAN_VAULT_PATH=./obsidian-vault
+SYNCTHING_PUID=1000
+SYNCTHING_PGID=1000
 ```
+
+Compose mounts `./obsidian-vault` into the app at `/app/obsidian`, so you can open `obsidian-vault` as an Obsidian vault on your host and see Oogway notes in real time.
+
+### Syncthing Vault Sync (Ubuntu + Docker)
+
+Syncthing is included in `docker-compose.yml` and shares the same vault folder that OogWorld writes to.
+
+1. Start the stack with `docker compose up -d`.
+2. Open Syncthing UI at `http://YOUR_UBUNTU_HOST:8384`.
+3. In Syncthing, add/share folder path `/sync/obsidian-vault`.
+4. Pair your other device(s) and accept the folder.
+5. On each client, open that synced folder as an Obsidian vault.
+
+Only use one sync method per vault (Syncthing OR Obsidian Sync) to avoid conflicts.
 
 **Note**: In this deployment, OogWorld runs on `10.0.0.55` and MediaMTX runs on the Windows Wall PC at `10.0.0.104`. If that Wall PC IP changes, update `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` to the new reachable IP or hostname.
 

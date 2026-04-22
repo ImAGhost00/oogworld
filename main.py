@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import random
+import re
 import shutil
 import uuid
 from contextlib import suppress
@@ -43,7 +44,11 @@ OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower(
     "on",
 }
 OOGWAY_BRAIN_NAME = os.getenv("OOGWAY_BRAIN_NAME", "Oogway")
-OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+OOGWAY_BRAIN_PROVIDER = os.getenv("OOGWAY_BRAIN_PROVIDER", "ollama").strip().lower()
+OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "qwen2.5:3b")
+OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip()
+OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip()
+OOGWAY_OLLAMA_VISION_MODEL = os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "moondream:latest").strip()
 OOGWAY_BRAIN_PERSONALITY = os.getenv(
     "OOGWAY_BRAIN_PERSONALITY",
     "You are Oogway, a warm and observant tortoise who talks like a living terrarium companion.",
@@ -84,12 +89,38 @@ OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
     900,
     int(os.getenv("OOGWAY_TEXTS_ANGER_AFTER_SECONDS", "14400")),
 )
+OOGWAY_OBSIDIAN_VAULT_PATH = Path(os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", BASE_DIR / "obsidian"))
+OOGWAY_OBSIDIAN_MEMORY_FOLDER = os.getenv("OOGWAY_OBSIDIAN_MEMORY_FOLDER", "Oogway Memory").strip() or "Oogway Memory"
 OOGWAY_BRAIN_MEMORY_PATH = Path(os.getenv("OOGWAY_BRAIN_MEMORY_PATH", BASE_DIR / "brain_memory.json"))
 OOGWAY_BRAIN_MEMORY_CAP = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_CAP", "300")))
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
 OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
+
+_MEMORY_STOPWORDS = {
+    "about",
+    "after",
+    "again",
+    "been",
+    "being",
+    "from",
+    "have",
+    "into",
+    "just",
+    "like",
+    "near",
+    "only",
+    "over",
+    "really",
+    "that",
+    "their",
+    "there",
+    "they",
+    "this",
+    "very",
+    "with",
+}
 
 ACTION_MESSAGE: dict[str, str] = {
     "Request Food": "OogWorld request: Please feed Oogway.",
@@ -395,6 +426,127 @@ def write_list_file(path: Path, items: list[dict[str, Any]], cap: int) -> None:
     path.write_text(json.dumps(items[-cap:], indent=2), encoding="utf-8")
 
 
+def brain_provider() -> str:
+    provider = (OOGWAY_BRAIN_PROVIDER or "ollama").strip().lower()
+    return provider if provider in {"ollama", "groq"} else "ollama"
+
+
+def ensure_obsidian_memory_dir() -> Path:
+    directory = OOGWAY_OBSIDIAN_VAULT_PATH / OOGWAY_OBSIDIAN_MEMORY_FOLDER
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def slugify_note_title(value: str) -> str:
+    cleaned = re.sub(r"[\\/:*?\"<>|]", "", value).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:80] or "note"
+
+
+def extract_memory_terms(text: str) -> set[str]:
+    terms = set(re.findall(r"[a-zA-Z0-9]{4,}", (text or "").lower()))
+    return {term for term in terms if term not in _MEMORY_STOPWORDS}
+
+
+def list_obsidian_memory_notes() -> list[Path]:
+    directory = ensure_obsidian_memory_dir()
+    return sorted(
+        [p for p in directory.glob("*.md") if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def search_obsidian_memories(query: str, limit: int = 6) -> list[dict[str, str]]:
+    terms = extract_memory_terms(query)
+    if not terms:
+        return []
+
+    matches: list[tuple[int, str, str]] = []
+    for note_path in list_obsidian_memory_notes()[:220]:
+        try:
+            content = note_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        lowered = content.lower()
+        score = sum(lowered.count(term) for term in terms)
+        if score <= 0:
+            continue
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+        snippet = next((ln for ln in lines if any(term in ln.lower() for term in terms)), "")
+        snippet = snippet[:180]
+        title = note_path.stem
+        matches.append((score, title, snippet))
+
+    matches.sort(key=lambda row: row[0], reverse=True)
+    return [{"title": title, "snippet": snippet} for _score, title, snippet in matches[:limit]]
+
+
+def recall_obsidian_memory_lines(query: str, limit: int = 4) -> list[str]:
+    recalls = search_obsidian_memories(query, limit=limit)
+    lines: list[str] = []
+    for recall in recalls:
+        title = recall.get("title", "memory")
+        snippet = recall.get("snippet", "")
+        lines.append(f"[[{title}]] {snippet}".strip())
+    return lines
+
+
+def append_to_obsidian_topic(topic_title: str, note_title: str, note_text: str) -> None:
+    directory = ensure_obsidian_memory_dir()
+    topic_path = directory / f"{slugify_note_title(topic_title)}.md"
+    if topic_path.exists():
+        current = topic_path.read_text(encoding="utf-8")
+    else:
+        current = f"# {topic_title}\n\n## Linked Memories\n"
+    bullet = f"- [[{note_title}]] {note_text[:120]}"
+    if bullet not in current:
+        if not current.endswith("\n"):
+            current += "\n"
+        current += bullet + "\n"
+        topic_path.write_text(current, encoding="utf-8")
+
+
+def write_obsidian_memory_note(item: dict[str, Any]) -> None:
+    ts = str(item.get("ts") or datetime.now(timezone.utc).isoformat())
+    topic = str(item.get("topic") or "memory").strip() or "memory"
+    trigger = str(item.get("trigger") or "periodic")
+    note_text = str(item.get("note") or "")
+    if not note_text:
+        return
+
+    directory = ensure_obsidian_memory_dir()
+    short_id = str(uuid.uuid4())[:8]
+    date_prefix = ts[:10]
+    note_title = f"{date_prefix} {topic} {short_id}"
+    note_path = directory / f"{slugify_note_title(note_title)}.md"
+
+    recalls = search_obsidian_memories(f"{topic} {note_text}", limit=3)
+    links = [f"[[Topic - {topic.title()}]]"]
+    for recall in recalls:
+        candidate = recall.get("title", "")
+        if candidate and candidate != note_title:
+            links.append(f"[[{candidate}]]")
+    links = list(dict.fromkeys(links))[:5]
+
+    body = "\n".join(
+        [
+            f"# {note_title}",
+            "",
+            f"- ts: {ts}",
+            f"- topic: {topic}",
+            f"- trigger: {trigger}",
+            f"- links: {' '.join(links)}",
+            "",
+            "## Memory",
+            note_text,
+            "",
+        ]
+    )
+    note_path.write_text(body, encoding="utf-8")
+    append_to_obsidian_topic(f"Topic - {topic.title()}", note_title, note_text)
+
+
 def read_action_log() -> list[dict[str, Any]]:
     return read_list_file(ACTION_LOG_PATH, cap=5)
 
@@ -430,6 +582,8 @@ def append_brain_memory(item: dict[str, Any]) -> dict[str, Any]:
     entries = read_brain_memory()
     entries.append(item)
     write_list_file(OOGWAY_BRAIN_MEMORY_PATH, entries, cap=OOGWAY_BRAIN_MEMORY_CAP)
+    with suppress(Exception):
+        write_obsidian_memory_note(item)
     return item
 
 
@@ -486,7 +640,10 @@ async def send_ntfy_message(
 
 
 def is_brain_configured() -> bool:
-    return bool(GROQ_API_KEY)
+    provider = brain_provider()
+    if provider == "groq":
+        return bool(GROQ_API_KEY)
+    return bool(OOGWAY_OLLAMA_BASE and OOGWAY_OLLAMA_MODEL)
 
 
 def get_brain_snapshot_targets() -> list[dict[str, str]]:
@@ -673,6 +830,12 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> 
         for m in memory
         if m.get("note")
     ]
+    recall_seed = ""
+    if source_message and source_message.get("text"):
+        recall_seed = str(source_message.get("text", ""))
+    else:
+        recall_seed = " ".join(str(msg.get("text", "")) for msg in recents[-5:])
+    obsidian_recalls = recall_obsidian_memory_lines(recall_seed, limit=4)
 
     if trigger == "mention" and source_message:
         trigger_text = (
@@ -710,9 +873,70 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> 
             "Long-term memory snippets:",
             "\n".join(memory_lines[-10:]) or "(none)",
             "",
+            "Obsidian recalls:",
+            "\n".join(obsidian_recalls) or "(none)",
+            "",
             "Rules: keep under 240 chars, no roleplay markers, no markdown.",
         ]
     )
+
+
+def _extract_data_url_base64(data_url: str) -> str:
+    if not data_url or "," not in data_url:
+        return ""
+    return data_url.split(",", 1)[1].strip()
+
+
+def _parse_json_from_text(content: str) -> dict[str, Any] | None:
+    text = str(content or "")
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
+    system_prompt = (
+        f"{OOGWAY_BRAIN_PERSONALITY} "
+        "You are in the OogWorld live chat. Be warm, brief, and grounded in current context."
+    )
+
+    image_payload: list[str] = []
+    for snapshot in snapshots[:2]:
+        encoded = _extract_data_url_base64(snapshot.get("dataUrl", ""))
+        if encoded:
+            image_payload.append(encoded)
+
+    model_name = OOGWAY_OLLAMA_VISION_MODEL if (image_payload and OOGWAY_OLLAMA_VISION_MODEL) else OOGWAY_OLLAMA_MODEL
+    user_msg: dict[str, Any] = {"role": "user", "content": prompt_text}
+    if image_payload and OOGWAY_OLLAMA_VISION_MODEL:
+        user_msg["images"] = image_payload
+
+    payload = {
+        "model": model_name,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            user_msg,
+        ],
+        "options": {"temperature": 0.7, "num_predict": 160},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            return ""
+        data = resp.json()
+        content = data.get("message", {}).get("content", "")
+        return str(content).strip()[:240]
+    except Exception:
+        return ""
 
 
 async def call_groq_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
@@ -760,126 +984,119 @@ async def call_groq_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]
     return str(content).strip()[:240]
 
 
-async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, bool]:
+async def call_oogway_brain_model(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
+    if brain_provider() == "groq":
+        return await call_groq_for_oogway(prompt_text, snapshots)
+    return await call_ollama_for_oogway(prompt_text, snapshots)
+
+
+async def vision_json_classify(
+    snapshots: list[dict[str, str]],
+    system_prompt: str,
+    task_prompt: str,
+    keys: list[str],
+) -> dict[str, bool]:
+    defaults = {key: False for key in keys}
     if not snapshots:
-        return {"food_empty": False, "water_empty": False}
+        return defaults
 
-    user_content: list[dict[str, Any]] = [
-        {
-            "type": "text",
-            "text": (
-                "Inspect these terrarium camera views and return only strict JSON with this shape: "
-                '{"food_empty": boolean, "water_empty": boolean}. '
-                "Mark true only when it visibly appears empty or nearly empty. If unsure, use false."
-            ),
+    provider = brain_provider()
+    if provider == "groq":
+        if not GROQ_API_KEY:
+            return defaults
+        user_content: list[dict[str, Any]] = [{"type": "text", "text": task_prompt}]
+        for snapshot in snapshots:
+            user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
+            user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
+
+        payload = {
+            "model": OOGWAY_BRAIN_MODEL,
+            "temperature": 0.1,
+            "max_tokens": 120,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
         }
-    ]
-    for snapshot in snapshots:
-        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
-        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        }
 
-    payload = {
-        "model": OOGWAY_BRAIN_MODEL,
-        "temperature": 0.1,
-        "max_tokens": 120,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You classify food and water bowl visibility from terrarium camera images.",
-            },
-            {"role": "user", "content": user_content},
-        ],
-    }
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+            if resp.status_code >= 400:
+                return defaults
+            content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            parsed = _parse_json_from_text(str(content))
+            if not parsed:
+                return defaults
+            return {key: bool(parsed.get(key, False)) for key in keys}
+        except Exception:
+            return defaults
+
+    if not OOGWAY_OLLAMA_VISION_MODEL:
+        return defaults
+
+    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
+    images = [img for img in images if img]
+    if not images:
+        return defaults
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-        if resp.status_code >= 400:
-            return {"food_empty": False, "water_empty": False}
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        text = str(content)
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return {"food_empty": False, "water_empty": False}
-        parsed = json.loads(text[start : end + 1])
-        return {
-            "food_empty": bool(parsed.get("food_empty", False)),
-            "water_empty": bool(parsed.get("water_empty", False)),
+        payload = {
+            "model": OOGWAY_OLLAMA_VISION_MODEL,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": task_prompt, "images": images},
+            ],
+            "options": {"temperature": 0.1, "num_predict": 120},
         }
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            return defaults
+        content = resp.json().get("message", {}).get("content", "")
+        parsed = _parse_json_from_text(str(content))
+        if not parsed:
+            return defaults
+        return {key: bool(parsed.get(key, False)) for key in keys}
     except Exception:
-        return {"food_empty": False, "water_empty": False}
+        return defaults
+
+
+async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, bool]:
+    return await vision_json_classify(
+        snapshots=snapshots,
+        system_prompt="You classify food and water bowl visibility from terrarium camera images.",
+        task_prompt=(
+            "Inspect these terrarium camera views and return only strict JSON with this shape: "
+            '{"food_empty": boolean, "water_empty": boolean}. '
+            "Mark true only when it visibly appears empty or nearly empty. If unsure, use false."
+        ),
+        keys=["food_empty", "water_empty"],
+    )
 
 
 async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str, bool]:
-    if not snapshots:
-        return {"eating": False, "drinking": False}
-
-    user_content: list[dict[str, Any]] = [
-        {
-            "type": "text",
-            "text": (
-                "Look at these terrarium camera images and return only strict JSON: "
-                '{"eating": boolean, "drinking": boolean}. '
-                "Set eating=true only if the tortoise is clearly and actively eating food right now. "
-                "Set drinking=true only if the tortoise is clearly and actively drinking water right now. "
-                "If the tortoise is not visible, not near food/water, or the activity is ambiguous, use false."
-            ),
-        }
-    ]
-    for snapshot in snapshots:
-        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
-        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
-
-    payload = {
-        "model": OOGWAY_BRAIN_MODEL,
-        "temperature": 0.1,
-        "max_tokens": 80,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You classify tortoise feeding and drinking behaviour from terrarium camera images.",
-            },
-            {"role": "user", "content": user_content},
-        ],
-    }
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
-                json=payload,
-                headers=headers,
-            )
-        if resp.status_code >= 400:
-            return {"eating": False, "drinking": False}
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        text = str(content)
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return {"eating": False, "drinking": False}
-        parsed = json.loads(text[start : end + 1])
-        return {
-            "eating": bool(parsed.get("eating", False)),
-            "drinking": bool(parsed.get("drinking", False)),
-        }
-    except Exception:
-        return {"eating": False, "drinking": False}
+    return await vision_json_classify(
+        snapshots=snapshots,
+        system_prompt="You classify tortoise feeding and drinking behaviour from terrarium camera images.",
+        task_prompt=(
+            "Look at these terrarium camera images and return only strict JSON: "
+            '{"eating": boolean, "drinking": boolean}. '
+            "Set eating=true only if the tortoise is clearly and actively eating food right now. "
+            "Set drinking=true only if the tortoise is clearly and actively drinking water right now. "
+            "If the tortoise is not visible, not near food/water, or the activity is ambiguous, use false."
+        ),
+        keys=["eating", "drinking"],
+    )
 
 
 _EATING_REACTIONS: list[str] = [
@@ -1142,7 +1359,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 
         prompt_text = build_oogway_prompt(trigger, source_message)
         snapshots = await capture_brain_snapshots_data_urls()
-        reply = await call_groq_for_oogway(prompt_text, snapshots)
+        reply = await call_oogway_brain_model(prompt_text, snapshots)
         if not reply:
             return
 

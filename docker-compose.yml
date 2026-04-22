@@ -2,6 +2,11 @@ services:
   oogworld:
     build: .
     container_name: oogworld
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-model-init:
+        condition: service_completed_successfully
     environment:
       # MediaMTX runs on the Windows Wall PC at 10.0.0.104; OogWorld proxies HLS from there.
       STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://10.0.0.104:8888/oogway-4k}
@@ -20,19 +25,83 @@ services:
       CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/chat_log.json}
       OOGWAY_BRAIN_ENABLED: ${OOGWAY_BRAIN_ENABLED:-false}
       OOGWAY_BRAIN_NAME: ${OOGWAY_BRAIN_NAME:-Oogway}
-      OOGWAY_BRAIN_MODEL: ${OOGWAY_BRAIN_MODEL:-meta-llama/llama-4-scout-17b-16e-instruct}
+      OOGWAY_BRAIN_PROVIDER: ${OOGWAY_BRAIN_PROVIDER:-ollama}
+      OOGWAY_BRAIN_MODEL: ${OOGWAY_BRAIN_MODEL:-qwen2.5:3b}
+      OOGWAY_OLLAMA_BASE: ${OOGWAY_OLLAMA_BASE:-http://ollama:11434}
+      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}
+      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}
       OOGWAY_BRAIN_PERSONALITY: ${OOGWAY_BRAIN_PERSONALITY:-You are Oogway, a warm and observant tortoise who talks like a living terrarium companion.}
       OOGWAY_BRAIN_INTERVAL_SECONDS: ${OOGWAY_BRAIN_INTERVAL_SECONDS:-300}
       OOGWAY_BRAIN_MENTION_TRIGGER: ${OOGWAY_BRAIN_MENTION_TRIGGER:-@oogway}
-      OOGWAY_BRAIN_CAMERA_KEY: ${OOGWAY_BRAIN_CAMERA_KEY:-primary}
+      OOGWAY_BRAIN_CAMERA_KEY: ${OOGWAY_BRAIN_CAMERA_KEY:-both}
       OOGWAY_BRAIN_MEMORY_PATH: ${OOGWAY_BRAIN_MEMORY_PATH:-/app/brain_memory.json}
       OOGWAY_BRAIN_MEMORY_CAP: ${OOGWAY_BRAIN_MEMORY_CAP:-300}
       OOGWAY_BRAIN_CONTEXT_CHAT_CAP: ${OOGWAY_BRAIN_CONTEXT_CHAT_CAP:-24}
+      OOGWAY_OBSIDIAN_VAULT_PATH: ${OOGWAY_OBSIDIAN_VAULT_PATH:-/app/obsidian}
+      OOGWAY_OBSIDIAN_MEMORY_FOLDER: ${OOGWAY_OBSIDIAN_MEMORY_FOLDER:-Oogway Memory}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_API_BASE: ${GROQ_API_BASE:-https://api.groq.com/openai/v1}
+    volumes:
+      - ${HOST_OBSIDIAN_VAULT_PATH:-./obsidian-vault}:/app/obsidian
     ports:
       - "4120:4120"
     restart: unless-stopped
     # For local dev only (Portainer ignores this):
     # env_file:
     #   - .env
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: oogworld-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  ollama-model-init:
+    image: ollama/ollama:latest
+    container_name: oogworld-ollama-model-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}
+      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        ollama pull "$OOGWAY_OLLAMA_MODEL"
+        ollama pull "$OOGWAY_OLLAMA_VISION_MODEL"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: "no"
+
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
+    container_name: oogworld-syncthing
+    environment:
+      PUID: ${SYNCTHING_PUID:-1000}
+      PGID: ${SYNCTHING_PGID:-1000}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - syncthing_config:/config
+      - ${HOST_OBSIDIAN_VAULT_PATH:-./obsidian-vault}:/sync/obsidian-vault
+    ports:
+      - "8384:8384"
+      - "22000:22000/tcp"
+      - "22000:22000/udp"
+      - "21027:21027/udp"
+    restart: unless-stopped
+
+volumes:
+  ollama_data:
+  syncthing_config:
