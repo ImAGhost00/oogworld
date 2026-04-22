@@ -340,6 +340,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      flex-wrap: wrap;
       padding: 10px 12px;
       border-top: 1px solid rgba(215, 224, 214, 0.2);
       background: rgba(12, 18, 12, 0.26);
@@ -362,6 +363,16 @@
       border-color: rgba(76, 175, 80, 0.8);
       background: rgba(76, 175, 80, 0.22);
       color: #dff6e0;
+    }
+
+    .chat-info-box {
+      margin: 0 8px 8px;
+      border: 1px solid rgba(126, 147, 124, 0.45);
+      border-radius: 10px;
+      padding: 7px 9px;
+      font-size: 12px;
+      color: #d7cfc4;
+      background: linear-gradient(145deg, rgba(53, 65, 54, 0.45), rgba(28, 36, 30, 0.58));
     }
 
     .daylight-banner {
@@ -534,9 +545,23 @@
       }
 
       .mobile-sticky-video {
-        position: sticky;
-        top: 0;
-        z-index: 20;
+        position: static;
+        top: auto;
+        z-index: auto;
+      }
+
+      .video-frame-wrap {
+        aspect-ratio: 16 / 10;
+      }
+
+      .video-controls {
+        gap: 6px;
+        padding: 8px;
+      }
+
+      .video-controls .v-btn {
+        padding: 4px 8px;
+        font-size: 11px;
       }
     }
   </style>
@@ -549,9 +574,11 @@
     <div class="panel w-full max-w-sm rounded-2xl p-8 text-center">
       <p class="text-xs uppercase tracking-[0.3em] text-[#d7cfc4]/80">www.ghostworld.dev</p>
       <h1 class="mt-1 text-3xl font-bold">OogWorld</h1>
-      <p class="mt-2 text-sm text-slate-400">Enter your username to join chat.</p>
+      <p class="mt-2 text-sm text-slate-400">name doesnt REALLY matter, its just how oogway will see and address you</p>
       <input id="username-input" type="text" maxlength="24" autocomplete="off" placeholder="Username"
         class="mt-5 w-full rounded-xl border border-[#4caf50]/40 bg-black/50 px-4 py-3 text-center outline-none focus:border-[#81c784]" />
+      <label class="mt-4 mb-1 block text-xs text-slate-400">Name Color</label>
+      <div id="login-color-swatches" class="mb-1 flex flex-wrap justify-center gap-2"></div>
       <button id="login-btn"
         class="mt-4 w-full rounded-xl bg-[#4caf50] py-3 text-sm font-bold uppercase tracking-wide text-[#0a1f0c]">Enter</button>
     </div>
@@ -573,7 +600,7 @@
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <div class="text-sm text-slate-100">Now Streaming: <span id="current-stream-label">Oogway Cam</span></div>
+            <div class="text-sm text-slate-100"><span id="current-stream-label">Hut Cam</span></div>
             <div class="flex items-center gap-2">
               <div class="relative">
                 <button id="report-icon-btn" class="report-icon-btn" title="Report issue">
@@ -598,14 +625,13 @@
             </div>
           </div>
           <div class="video-controls">
-            <div id="stream-switcher" class="flex flex-1 flex-wrap gap-2"></div>
-            <button id="video-switch-btn" class="v-btn">Switch Cams</button>
+            <button id="video-switch-btn" class="v-btn">Switch Cam</button>
             <button id="video-refresh-btn" class="v-btn">Reload Stream</button>
             <button id="video-popout-btn" class="v-btn">Open Player</button>
           </div>
         </article>
 
-        <aside class="panel flex h-[68vh] min-h-[420px] flex-col overflow-hidden rounded-xl md:col-span-2">
+        <aside class="panel flex h-[56vh] min-h-[300px] flex-col overflow-hidden rounded-xl md:col-span-2 md:h-[68vh] md:min-h-[420px]">
           <div class="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
             <div class="flex items-center gap-2">
               <div class="text-sm font-semibold text-slate-100">Live Chat</div>
@@ -615,6 +641,7 @@
           </div>
 
           <div id="chat-messages" class="chat-scroll flex-1 overflow-y-auto px-3 py-2 text-sm"></div>
+          <div class="chat-info-box">use @oogway to talk to oogway.</div>
 
           <div class="border-t border-neutral-800 p-2">
             <div class="flex gap-2">
@@ -768,11 +795,11 @@
         app: document.getElementById("app"),
         loginOverlay: document.getElementById("login-overlay"),
         usernameInput: document.getElementById("username-input"),
+        loginColorSwatches: document.getElementById("login-color-swatches"),
         loginBtn: document.getElementById("login-btn"),
         usernameBadge: document.getElementById("username-badge"),
         hlsVideo: document.getElementById("hls-video"),
         currentStreamLabel: document.getElementById("current-stream-label"),
-        streamSwitcher: document.getElementById("stream-switcher"),
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
@@ -1024,32 +1051,15 @@
         var active = getActiveStreamOption();
         var hasSwitcher = options.length > 1;
 
-        el.streamSwitcher.innerHTML = "";
-        el.streamSwitcher.style.display = hasSwitcher ? "flex" : "none";
         el.videoSwitchBtn.disabled = !hasSwitcher;
         el.videoSwitchBtn.style.opacity = hasSwitcher ? "1" : "0.55";
         el.videoSwitchBtn.style.cursor = hasSwitcher ? "pointer" : "not-allowed";
 
         if (active) {
-          el.currentStreamLabel.textContent = active.label + (active.resolution ? " " + active.resolution : "");
+          el.currentStreamLabel.textContent = active.label;
         } else {
-          el.currentStreamLabel.textContent = "Oogway Cam";
+          el.currentStreamLabel.textContent = "Hut Cam";
         }
-
-        if (!hasSwitcher) {
-          return;
-        }
-
-        options.forEach(function (option) {
-          var btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "v-btn" + (active && option.key === active.key ? " active" : "");
-          btn.textContent = option.label + (option.resolution ? " • " + option.resolution : "");
-          btn.addEventListener("click", function () {
-            selectStream(option.key, true);
-          });
-          el.streamSwitcher.appendChild(btn);
-        });
       }
 
       function selectStream(key, forceReload) {
@@ -1458,8 +1468,11 @@
         connectChat();
       }
 
-      function buildColorSwatches(selected) {
-        el.chatColorSwatches.innerHTML = "";
+      function buildColorSwatches(targetEl, selected) {
+        if (!targetEl) {
+          return;
+        }
+        targetEl.innerHTML = "";
         COLOR_OPTIONS.forEach(function (color) {
           var btn = document.createElement("button");
           btn.type = "button";
@@ -1468,9 +1481,9 @@
           btn.title = color;
           btn.addEventListener("click", function () {
             state.badgeColor = color;
-            buildColorSwatches(color);
+            buildColorSwatches(targetEl, color);
           });
-          el.chatColorSwatches.appendChild(btn);
+          targetEl.appendChild(btn);
         });
       }
 
@@ -1480,7 +1493,7 @@
         radios.forEach(function (r) {
           r.checked = r.value === state.chatTextColor;
         });
-        buildColorSwatches(state.badgeColor);
+        buildColorSwatches(el.chatColorSwatches, state.badgeColor);
         el.chatSettingsModal.classList.remove("hidden");
       }
 
@@ -1540,6 +1553,7 @@
         if (!input) return;
         state.username = input.replace(/[<>]/g, "").slice(0, 24) || "Anonymous";
         sessionStorage.setItem("oogworld_username", state.username);
+        sessionStorage.setItem("oogworld_badge_color", state.badgeColor);
         el.loginOverlay.classList.add("hidden");
         el.app.classList.remove("hidden");
         bootstrap();
@@ -1663,6 +1677,9 @@
         el.app.classList.remove("hidden");
         renderAdminView();
         bootstrap();
+      }
+      else {
+        buildColorSwatches(el.loginColorSwatches, state.badgeColor);
       }
     }());
   </script>

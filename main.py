@@ -50,6 +50,14 @@ OOGWAY_BRAIN_PERSONALITY = os.getenv(
 OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(os.getenv("OOGWAY_BRAIN_INTERVAL_SECONDS", "300")))
 OOGWAY_BRAIN_MENTION_TRIGGER = os.getenv("OOGWAY_BRAIN_MENTION_TRIGGER", "@oogway")
 OOGWAY_BRAIN_CAMERA_KEY = os.getenv("OOGWAY_BRAIN_CAMERA_KEY", "both")
+OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS = max(
+    60,
+    int(os.getenv("OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS", "1800")),
+)
+OOGWAY_BRAIN_MOTION_THRESHOLD = max(
+    0.01,
+    min(1.0, float(os.getenv("OOGWAY_BRAIN_MOTION_THRESHOLD", "0.06"))),
+)
 OOGWAY_BRAIN_MEMORY_PATH = Path(os.getenv("OOGWAY_BRAIN_MEMORY_PATH", BASE_DIR / "brain_memory.json"))
 OOGWAY_BRAIN_MEMORY_CAP = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_CAP", "300")))
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
@@ -104,6 +112,8 @@ DAYLIGHT_TASK: asyncio.Task[Any] | None = None
 BRAIN_TASK: asyncio.Task[Any] | None = None
 BRAIN_LOCK = asyncio.Lock()
 LAST_BRAIN_SPOKE_AT: datetime | None = None
+LAST_BRAIN_MOVEMENT_AT: datetime | None = None
+LAST_BRAIN_MOTION_PROBES: dict[str, bytes] = {}
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -501,6 +511,80 @@ async def capture_stream_snapshot_data_url(hls_url: str) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+async def capture_stream_motion_probe(hls_url: str) -> bytes:
+    if not hls_url:
+        return b""
+    ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            ffmpeg_bin,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            hls_url,
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=32:18,format=gray",
+            "-f",
+            "rawvideo",
+            "pipe:1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+    except Exception:
+        return b""
+    return stdout or b""
+
+
+def motion_score(previous: bytes, current: bytes) -> float:
+    if not previous or not current or len(previous) != len(current):
+        return 0.0
+    total = len(current)
+    if total == 0:
+        return 0.0
+    diff_sum = 0
+    for idx in range(total):
+        diff_sum += abs(current[idx] - previous[idx])
+    return diff_sum / (255.0 * total)
+
+
+async def refresh_brain_motion_state() -> bool:
+    global LAST_BRAIN_MOVEMENT_AT
+
+    targets = get_brain_snapshot_targets()
+    if not targets:
+        return False
+
+    probe_values = await asyncio.gather(
+        *(capture_stream_motion_probe(target["hlsUrl"]) for target in targets),
+        return_exceptions=True,
+    )
+
+    motion_detected = False
+    for target, probe in zip(targets, probe_values):
+        if isinstance(probe, Exception) or not probe:
+            continue
+        key = target["key"]
+        previous = LAST_BRAIN_MOTION_PROBES.get(key, b"")
+        if previous:
+            score = motion_score(previous, probe)
+            if score >= OOGWAY_BRAIN_MOTION_THRESHOLD:
+                motion_detected = True
+        LAST_BRAIN_MOTION_PROBES[key] = probe
+
+    if motion_detected:
+        LAST_BRAIN_MOVEMENT_AT = now_utc()
+
+    if not LAST_BRAIN_MOVEMENT_AT:
+        return False
+    age = (now_utc() - LAST_BRAIN_MOVEMENT_AT).total_seconds()
+    return age <= OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS
+
+
 async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
     targets = get_brain_snapshot_targets()
     if not targets:
@@ -678,6 +762,10 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
             elapsed = (now_utc() - LAST_BRAIN_SPOKE_AT).total_seconds()
             if elapsed < OOGWAY_BRAIN_INTERVAL_SECONDS:
                 return
+
+        movement_recent = await refresh_brain_motion_state()
+        if trigger == "periodic" and not movement_recent:
+            return
 
         prompt_text = build_oogway_prompt(trigger, source_message)
         snapshots = await capture_brain_snapshots_data_urls()
@@ -938,6 +1026,9 @@ def get_reports() -> dict[str, dict[str, Any]]:
 @app.get("/api/brain/status")
 def brain_status() -> dict[str, Any]:
     targets = get_brain_snapshot_targets()
+    movement_age_seconds = None
+    if LAST_BRAIN_MOVEMENT_AT:
+        movement_age_seconds = max(0, int((now_utc() - LAST_BRAIN_MOVEMENT_AT).total_seconds()))
     return {
         "enabled": OOGWAY_BRAIN_ENABLED,
         "configured": is_brain_configured(),
@@ -946,6 +1037,10 @@ def brain_status() -> dict[str, Any]:
         "cameraKey": OOGWAY_BRAIN_CAMERA_KEY,
         "cameraTargets": [{"key": t["key"], "label": t["label"]} for t in targets],
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+        "movementWindowSeconds": OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS,
+        "movementThreshold": OOGWAY_BRAIN_MOTION_THRESHOLD,
+        "lastMovementAt": LAST_BRAIN_MOVEMENT_AT.isoformat() if LAST_BRAIN_MOVEMENT_AT else "",
+        "movementAgeSeconds": movement_age_seconds,
         "awake": brain_awake_now(),
         "memoryItems": len(read_brain_memory()),
         "lastSpokeAt": LAST_BRAIN_SPOKE_AT.isoformat() if LAST_BRAIN_SPOKE_AT else "",
