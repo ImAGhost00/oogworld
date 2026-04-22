@@ -45,10 +45,12 @@ OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower(
 }
 OOGWAY_BRAIN_NAME = os.getenv("OOGWAY_BRAIN_NAME", "Oogway")
 OOGWAY_BRAIN_PROVIDER = os.getenv("OOGWAY_BRAIN_PROVIDER", "ollama").strip().lower()
-OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "qwen2.5:3b")
-OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip()
-OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip()
-OOGWAY_OLLAMA_VISION_MODEL = os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "moondream:latest").strip()
+OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "qwen2.5:3b").strip() or "qwen2.5:3b"
+OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip() or "http://ollama:11434"
+OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip() or OOGWAY_BRAIN_MODEL
+OOGWAY_OLLAMA_VISION_MODEL = (
+    os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "moondream:latest").strip() or "moondream:latest"
+)
 OOGWAY_BRAIN_PERSONALITY = os.getenv(
     "OOGWAY_BRAIN_PERSONALITY",
     "You are Oogway, a warm and observant tortoise who talks like a living terrarium companion.",

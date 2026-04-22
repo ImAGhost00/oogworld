@@ -99,8 +99,10 @@ services:
           return 0
         }
 
-        pull_with_retry "$OOGWAY_OLLAMA_MODEL" "chat"
-        pull_with_retry "$OOGWAY_OLLAMA_VISION_MODEL" "vision"
+        chat_model="${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}"
+        vision_model="${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}"
+        pull_with_retry "$chat_model" "chat"
+        pull_with_retry "$vision_model" "vision"
     volumes:
       - ollama_data:/root/.ollama
     restart: "no"
