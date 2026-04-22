@@ -454,6 +454,17 @@ async def broadcast_chat(item: dict[str, Any]) -> None:
     CHAT_CLIENTS.difference_update(dead)
 
 
+async def broadcast_viewer_count() -> None:
+    count = len(CHAT_CLIENTS)
+    dead: set[WebSocket] = set()
+    for client in list(CHAT_CLIENTS):
+        try:
+            await client.send_json({"kind": "viewer_count", "count": count})
+        except Exception:
+            dead.add(client)
+    CHAT_CLIENTS.difference_update(dead)
+
+
 async def send_ntfy_message(
     topic: str,
     message: str,
@@ -1491,6 +1502,7 @@ async def chat_ws(
     safe_name_color = usernameColor[:12] if usernameColor.startswith("#") else "#a3e635"
     await ws.accept()
     CHAT_CLIENTS.add(ws)
+    await broadcast_viewer_count()
 
     for msg in read_chat_log():
         try:
@@ -1521,6 +1533,7 @@ async def chat_ws(
                 asyncio.create_task(run_oogway_brain(trigger="mention", source_message=msg))
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)
+        await broadcast_viewer_count()
 
 
 @app.post("/api/actions")

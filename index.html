@@ -517,6 +517,19 @@
       background: rgba(56, 142, 60, 0.24);
     }
 
+    .viewer-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 11px;
+      color: #94a3b8;
+      background: rgba(148, 163, 184, 0.08);
+      user-select: none;
+    }
+
     .admin-delete-btn {
       margin-left: 6px;
       border-radius: 999px;
@@ -609,6 +622,7 @@
                 <div id="report-banner" class="report-banner"></div>
               </div>
               <span class="live-chip"><span class="live-pulse"></span> LIVE</span>
+              <span id="viewer-count-chip" class="viewer-chip">&#128065; 1</span>
               <button id="video-settings-btn" class="cog-btn" title="Video settings">&#9881;</button>
             </div>
           </div>
@@ -799,7 +813,7 @@
         loginBtn: document.getElementById("login-btn"),
         usernameBadge: document.getElementById("username-badge"),
         hlsVideo: document.getElementById("hls-video"),
-        currentStreamLabel: document.getElementById("current-stream-label"),
+        viewerCountChip: document.getElementById("viewer-count-chip"),
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
@@ -1203,7 +1217,12 @@
 
         state.ws.onmessage = function (evt) {
           try {
-            appendChatMessage(JSON.parse(evt.data));
+            var msg = JSON.parse(evt.data);
+            if (msg.kind === "viewer_count") {
+              if (el.viewerCountChip) el.viewerCountChip.textContent = "\uD83D\uDC41 " + msg.count;
+              return;
+            }
+            appendChatMessage(msg);
           } catch (e) {
             // ignore malformed messages
           }
