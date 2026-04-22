@@ -5,8 +5,6 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
-      ollama-model-init:
-        condition: service_completed_successfully
     environment:
       # MediaMTX runs on the Windows Wall PC at 10.0.0.104; OogWorld proxies HLS from there.
       STREAM_URL_PRIMARY: ${STREAM_URL_PRIMARY:-http://10.0.0.104:8888/oogway-4k}
@@ -72,6 +70,7 @@ services:
       ollama:
         condition: service_healthy
     environment:
+      OLLAMA_HOST: http://ollama:11434
       OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}
       OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}
     entrypoint:
@@ -79,14 +78,34 @@ services:
       - -c
       - |
         set -e
-        ollama pull "$OOGWAY_OLLAMA_MODEL"
-        ollama pull "$OOGWAY_OLLAMA_VISION_MODEL"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: "no"
+        pulled_chat=0
+        for i in 1 2 3 4 5 6 7 8; do
+          if ollama pull "$OOGWAY_OLLAMA_MODEL"; then
+            pulled_chat=1
+            set -e
+            pull_with_retry() {
+              model_name="$1"
+              label="$2"
+              if [ -z "$model_name" ]; then
+                echo "${label} model not set, skipping"
+                return 0
+              fi
 
-  syncthing:
-    image: lscr.io/linuxserver/syncthing:latest
+              for i in 1 2 3 4 5 6 7 8; do
+                if ollama pull "$model_name"; then
+                  echo "pulled ${label} model: $model_name"
+                  return 0
+                fi
+                echo "${label} model pull failed (attempt $i), retrying..."
+                sleep 5
+              done
+
+              echo "warning: unable to pull ${label} model '$model_name' after retries; continuing"
+              return 0
+            }
+
+            pull_with_retry "$OOGWAY_OLLAMA_MODEL" "chat"
+            pull_with_retry "$OOGWAY_OLLAMA_VISION_MODEL" "vision"
     container_name: oogworld-syncthing
     environment:
       PUID: ${SYNCTHING_PUID:-1000}
