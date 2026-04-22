@@ -1,4 +1,4 @@
-# OogWorld Dashboard v0.1.0
+# OogWorld Dashboard v0.3.0
 
 A real-time terrarium monitoring and control dashboard for Oogway's enclosure, featuring live HLS stream playback, selectable dual-camera views, and action notifications via ntfy.
 
@@ -8,6 +8,7 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 - **Frontend**: Responsive SPA with Tailwind CSS, HLS.js video player
 - **Stream Source**: MediaMTX RTSP-to-HLS gateway
 - **Notifications**: ntfy.sh webhook integration
+- **AI Brain**: Groq vision-enabled chat agent (Oogway)
 - **Deployment**: Docker Compose
 
 ## Prerequisites
@@ -17,6 +18,7 @@ A real-time terrarium monitoring and control dashboard for Oogway's enclosure, f
 3. **ntfy.sh topic** created (or use a self-hosted ntfy server)
 4. **Admin password** configured with `ADMIN_PASSWORD`
 5. **Terrarium coordinates** configured with `SUN_LAT` and `SUN_LNG`
+6. **Groq API key** (only when enabling Oogway brain) configured with `GROQ_API_KEY`
 
 ### MediaMTX / Wall PC Streaming Example
 
@@ -65,6 +67,13 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `BEDTIME_SOON_MINUTES` → minutes before sunset to show bedtime countdown (default `90`)
   - `ACTIVITY_LOG_PATH` → `/app/activity_log.json` (leave as default)
   - `CHAT_LOG_PATH` → `/app/chat_log.json` (leave as default)
+  - `OOGWAY_BRAIN_ENABLED` → `true` to enable Oogway AI brain
+  - `GROQ_API_KEY` → Groq API key used for chat + camera vision
+  - `OOGWAY_BRAIN_MODEL` → model id (default `meta-llama/llama-4-scout-17b-16e-instruct`)
+  - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
+  - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
+  - `OOGWAY_BRAIN_CAMERA_KEY` → `primary` or `secondary` camera for vision snapshots
+  - `OOGWAY_BRAIN_MEMORY_PATH` → persisted memory file path (`/app/brain_memory.json`)
 3. Deploy the stack
 
 #### With Docker CLI
@@ -92,6 +101,13 @@ SUN_LNG=-74.0060
 BEDTIME_SOON_MINUTES=90
 ACTIVITY_LOG_PATH=/app/activity_log.json
 CHAT_LOG_PATH=/app/chat_log.json
+OOGWAY_BRAIN_ENABLED=true
+GROQ_API_KEY=replace-with-groq-key
+OOGWAY_BRAIN_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
+OOGWAY_BRAIN_INTERVAL_SECONDS=300
+OOGWAY_BRAIN_MENTION_TRIGGER=@oogway
+OOGWAY_BRAIN_CAMERA_KEY=primary
+OOGWAY_BRAIN_MEMORY_PATH=/app/brain_memory.json
 ```
 
 **Note**: In this deployment, OogWorld runs on `10.0.0.55` and MediaMTX runs on the Windows Wall PC at `10.0.0.104`. If that Wall PC IP changes, update `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` to the new reachable IP or hostname.
@@ -135,6 +151,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 - `POST /api/admin/reports/reset` – Admin reset for food, water, or all report alerts
 - `DELETE /api/admin/chat/{message_id}` – Admin delete for individual chat messages
 - `POST /api/admin/chat/clear` – Admin clear entire chat log
+- `GET /api/brain/status` – Returns Oogway brain config/runtime status
 - `WS /ws/chat` – Real-time chat broadcast channel
 
 ## Features
@@ -153,6 +170,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 - **Heatlamp Daylight Automation**: Sunrise/sunset schedule fetched from `https://sunrise-sunset.org/api` several times per day
 - **Bedtime Banners**: Countdown appears before sunset; overnight banner shows `oogway is asleep, his heatlamp will turn on in XX:XX`
 - **Night Mode**: When Oogway is asleep, the app shifts into moon-and-stars night theme
+- **Oogway Brain**: Optional AI chat companion that can see a camera snapshot, respond to `@oogway`, post periodic updates while awake, and persist memory over time
 - **Responsive Design**: Desktop layout (video left, controls right) and mobile stack (video top, buttons bottom)
 - **GhostWorld Aesthetic**: Nature-inspired dark palette with forest greens and warm neutral text
 - **Live Status Pulse**: Animated breathing dot indicates stream is live
@@ -197,7 +215,7 @@ The application is designed with extension points for:
 
 ## Version
 
-- Current: 0.2.2
+- Current: 0.3.0
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog

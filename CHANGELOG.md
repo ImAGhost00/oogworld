@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.0] - 2026-04-21
+- Added Oogway Brain feature in `main.py` with Groq-backed chat generation and camera-vision support.
+- Added mention-triggered responses when users include `@oogway` (configurable trigger token).
+- Added periodic autonomous chat while Oogway is awake based on existing sunrise/sunset logic.
+- Added persistent long-term memory file (`brain_memory.json`) so Oogway can retain interaction context.
+- Added brain status endpoint: `GET /api/brain/status`.
+- Extended health payload with brain configuration flags and model info.
+- Added Docker environment settings for brain behavior, memory, and Groq API integration.
+- Updated app container image to include `ffmpeg` for HLS snapshot capture used by multimodal prompts.
+- Bumped backend version to `0.3.0` and synchronized README docs.
+
 ## [0.2.2] - 2026-04-20
 - Added integration-ready React component files at `components/ui/material-ui-dropdown-menu.tsx` and `components/ui/demo.tsx`.
 - Included the provided Material-style Radix dropdown menu implementation and demo usage.
