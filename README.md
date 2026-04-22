@@ -73,6 +73,12 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
   - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
   - `OOGWAY_BRAIN_CAMERA_KEY` → `both` (recommended), `primary`, or `secondary` for vision snapshots
+  - `OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS` → how often Oogway checks bowls (default `180`)
+  - `OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS` → consecutive empty checks required before alert (default `3`)
+  - `OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS` → minimum seconds between repeated care text alerts (default `3600`)
+  - `OOGWAY_TEXTS_TOPIC` → ntfy topic for Oogway text-style messages (default `oogworldtexts`)
+  - `OOGWAY_TEXTS_STYLE` → `auto`, `nice`, or `angry` tone for Oogway text notifications
+  - `OOGWAY_TEXTS_ANGER_AFTER_SECONDS` → in `auto`, unresolved care need age before angry texts (default `14400`)
   - `OOGWAY_BRAIN_MEMORY_PATH` → persisted memory file path (`/app/brain_memory.json`)
 3. Deploy the stack
 
@@ -107,6 +113,12 @@ OOGWAY_BRAIN_MODEL=meta-llama/llama-4-scout-17b-16e-instruct
 OOGWAY_BRAIN_INTERVAL_SECONDS=300
 OOGWAY_BRAIN_MENTION_TRIGGER=@oogway
 OOGWAY_BRAIN_CAMERA_KEY=both
+OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS=180
+OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS=3
+OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS=3600
+OOGWAY_TEXTS_TOPIC=oogworldtexts
+OOGWAY_TEXTS_STYLE=auto
+OOGWAY_TEXTS_ANGER_AFTER_SECONDS=14400
 OOGWAY_BRAIN_MEMORY_PATH=/app/brain_memory.json
 ```
 

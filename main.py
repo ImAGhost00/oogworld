@@ -58,11 +58,29 @@ OOGWAY_BRAIN_MOTION_THRESHOLD = max(
     0.01,
     min(1.0, float(os.getenv("OOGWAY_BRAIN_MOTION_THRESHOLD", "0.06"))),
 )
+OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS = max(
+    60,
+    int(os.getenv("OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS", "180")),
+)
+OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS = max(
+    2,
+    int(os.getenv("OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS", "3")),
+)
+OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS = max(
+    300,
+    int(os.getenv("OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS", "3600")),
+)
+OOGWAY_TEXTS_STYLE = os.getenv("OOGWAY_TEXTS_STYLE", "auto").strip().lower()
+OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
+    900,
+    int(os.getenv("OOGWAY_TEXTS_ANGER_AFTER_SECONDS", "14400")),
+)
 OOGWAY_BRAIN_MEMORY_PATH = Path(os.getenv("OOGWAY_BRAIN_MEMORY_PATH", BASE_DIR / "brain_memory.json"))
 OOGWAY_BRAIN_MEMORY_CAP = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_CAP", "300")))
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/openai/v1")
+OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
 
 ACTION_MESSAGE: dict[str, str] = {
     "Request Food": "OogWorld request: Please feed Oogway.",
@@ -114,6 +132,9 @@ BRAIN_LOCK = asyncio.Lock()
 LAST_BRAIN_SPOKE_AT: datetime | None = None
 LAST_BRAIN_MOVEMENT_AT: datetime | None = None
 LAST_BRAIN_MOTION_PROBES: dict[str, bytes] = {}
+LAST_BRAIN_CARE_CHECK_AT: datetime | None = None
+CARE_EMPTY_STREAK: dict[str, int] = {"food": 0, "water": 0}
+LAST_CARE_ALERT_AT: dict[str, datetime | None] = {"food": None, "water": None}
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -422,12 +443,19 @@ async def broadcast_chat(item: dict[str, Any]) -> None:
     CHAT_CLIENTS.difference_update(dead)
 
 
-async def send_ntfy_message(topic: str, message: str) -> None:
+async def send_ntfy_message(
+    topic: str,
+    message: str,
+    *,
+    title: str = "OogWorld Action",
+    priority: str = "default",
+    tags: str = "turtle,terrarium",
+) -> None:
     url = f"https://ntfy.sh/{topic}"
     headers = {
-        "Title": "OogWorld Action",
-        "Priority": "default",
-        "Tags": "turtle,terrarium",
+        "Title": title,
+        "Priority": priority,
+        "Tags": tags,
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         response = await client.post(url, content=message.encode("utf-8"), headers=headers)
@@ -710,6 +738,195 @@ async def call_groq_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]
     return str(content).strip()[:240]
 
 
+async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, bool]:
+    if not snapshots:
+        return {"food_empty": False, "water_empty": False}
+
+    user_content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Inspect these terrarium camera views and return only strict JSON with this shape: "
+                '{"food_empty": boolean, "water_empty": boolean}. '
+                "Mark true only when it visibly appears empty or nearly empty. If unsure, use false."
+            ),
+        }
+    ]
+    for snapshot in snapshots:
+        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
+        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
+
+    payload = {
+        "model": OOGWAY_BRAIN_MODEL,
+        "temperature": 0.1,
+        "max_tokens": 120,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You classify food and water bowl visibility from terrarium camera images.",
+            },
+            {"role": "user", "content": user_content},
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+        if resp.status_code >= 400:
+            return {"food_empty": False, "water_empty": False}
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = str(content)
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return {"food_empty": False, "water_empty": False}
+        parsed = json.loads(text[start : end + 1])
+        return {
+            "food_empty": bool(parsed.get("food_empty", False)),
+            "water_empty": bool(parsed.get("water_empty", False)),
+        }
+    except Exception:
+        return {"food_empty": False, "water_empty": False}
+
+
+def care_alert_on_cooldown(kind: str) -> bool:
+    last = LAST_CARE_ALERT_AT.get(kind)
+    if not last:
+        return False
+    return (now_utc() - last).total_seconds() < OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS
+
+
+def report_age_seconds(kind: str) -> int:
+    updated_at = str((ACTIVE_REPORTS.get(kind) or {}).get("updatedAt", ""))
+    updated_dt = parse_iso_ts(updated_at)
+    if not updated_dt:
+        return 0
+    return max(0, int((now_utc() - updated_dt).total_seconds()))
+
+
+def care_text_tone(kind: str) -> str:
+    style = OOGWAY_TEXTS_STYLE
+    if style in {"nice", "kind", "gentle"}:
+        return "nice"
+    if style in {"angry", "grumpy", "strict"}:
+        return "angry"
+    # auto mode escalates when care need has been unresolved for too long
+    age = report_age_seconds(kind)
+    return "angry" if age >= OOGWAY_TEXTS_ANGER_AFTER_SECONDS else "nice"
+
+
+def build_oogway_care_text(kind: Literal["food", "water"], reminder: bool) -> tuple[str, str, str]:
+    tone = care_text_tone(kind)
+    need_word = "food" if kind == "food" else "water"
+
+    if tone == "angry":
+        if reminder:
+            chat_text = f"im still waiting. i need {need_word} now."
+            notify_text = f"Oogway: I am still waiting. I need {need_word} now."
+        else:
+            chat_text = f"it appears im out of {need_word}. please fix this now."
+            notify_text = f"Oogway: It appears I'm out of {need_word}. Please fix this now."
+        priority = "high"
+    else:
+        if reminder:
+            chat_text = f"friendly reminder, i still need {need_word}."
+            notify_text = f"Oogway: Friendly reminder, I still need {need_word} when you get a moment."
+        else:
+            chat_text = f"it appears im out of {need_word}."
+            notify_text = f"Oogway: It appears I'm out of {need_word}. Could someone help me out?"
+        priority = "default"
+
+    return chat_text, notify_text, priority
+
+
+async def emit_oogway_care_alert(kind: Literal["food", "water"], reminder: bool = False) -> None:
+    now_dt = now_utc()
+    now_iso = now_dt.isoformat()
+    chat_text, notify_text, priority = build_oogway_care_text(kind, reminder)
+
+    existing_updated_at = str((ACTIVE_REPORTS.get(kind) or {}).get("updatedAt", ""))
+    ACTIVE_REPORTS[kind] = {
+        "active": True,
+        "reporter": OOGWAY_BRAIN_NAME,
+        "updatedAt": existing_updated_at if (reminder and existing_updated_at) else now_iso,
+    }
+
+    chat_item = {
+        "id": str(uuid.uuid4()),
+        "kind": "report",
+        "username": OOGWAY_BRAIN_NAME,
+        "usernameColor": BRAIN_USERNAME_COLOR,
+        "text": chat_text,
+        "textColor": "white",
+        "ts": now_iso,
+        "report": {
+            "kind": kind,
+            "active": True,
+        },
+    }
+    append_chat_log(chat_item)
+    await broadcast_chat(chat_item)
+
+    if OOGWAY_TEXTS_TOPIC:
+        with suppress(Exception):
+            await send_ntfy_message(
+                OOGWAY_TEXTS_TOPIC,
+                notify_text,
+                title=f"Text from {OOGWAY_BRAIN_NAME}",
+                priority=priority,
+                tags="turtle,text,care",
+            )
+
+    LAST_CARE_ALERT_AT[kind] = now_dt
+
+
+async def run_brain_care_check() -> None:
+    global LAST_BRAIN_CARE_CHECK_AT
+
+    if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        return
+
+    if LAST_BRAIN_CARE_CHECK_AT:
+        elapsed = (now_utc() - LAST_BRAIN_CARE_CHECK_AT).total_seconds()
+        if elapsed < OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS:
+            return
+
+    LAST_BRAIN_CARE_CHECK_AT = now_utc()
+
+    movement_recent = await refresh_brain_motion_state()
+    snapshots = await capture_brain_snapshots_data_urls()
+    care_eval = await evaluate_care_needs(snapshots)
+
+    for kind in ["food", "water"]:
+        empty_flag = care_eval.get(f"{kind}_empty", False)
+        CARE_EMPTY_STREAK[kind] = (CARE_EMPTY_STREAK[kind] + 1) if empty_flag else 0
+
+        if not empty_flag:
+            continue
+
+        active_report = bool(ACTIVE_REPORTS.get(kind, {}).get("active"))
+        if care_alert_on_cooldown(kind):
+            continue
+        if not movement_recent:
+            continue
+
+        if active_report:
+            await emit_oogway_care_alert(kind, reminder=True)
+            continue
+
+        if CARE_EMPTY_STREAK[kind] >= OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS:
+            await emit_oogway_care_alert(kind, reminder=False)
+
+
 def remember_interaction(trigger: str, source_message: dict[str, Any] | None, reply_text: str) -> None:
     topic = "routine"
     source_text = (source_message or {}).get("text", "")
@@ -789,11 +1006,12 @@ async def oogway_brain_loop() -> None:
     await asyncio.sleep(20)
     while True:
         try:
+            await run_brain_care_check()
             await run_oogway_brain(trigger="periodic")
         except Exception:
             # Keep loop alive even if upstream LLM/camera calls fail.
             pass
-        await asyncio.sleep(OOGWAY_BRAIN_INTERVAL_SECONDS)
+        await asyncio.sleep(min(OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS))
 
 
 def get_local_tz() -> ZoneInfo:
@@ -1037,6 +1255,12 @@ def brain_status() -> dict[str, Any]:
         "cameraKey": OOGWAY_BRAIN_CAMERA_KEY,
         "cameraTargets": [{"key": t["key"], "label": t["label"]} for t in targets],
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+        "careCheckIntervalSeconds": OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS,
+        "careConfirmations": OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS,
+        "careAlertCooldownSeconds": OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS,
+        "textsTopic": OOGWAY_TEXTS_TOPIC,
+        "textsStyle": OOGWAY_TEXTS_STYLE,
+        "textsAngerAfterSeconds": OOGWAY_TEXTS_ANGER_AFTER_SECONDS,
         "movementWindowSeconds": OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS,
         "movementThreshold": OOGWAY_BRAIN_MOTION_THRESHOLD,
         "lastMovementAt": LAST_BRAIN_MOVEMENT_AT.isoformat() if LAST_BRAIN_MOVEMENT_AT else "",
@@ -1082,6 +1306,8 @@ async def admin_reset_reports(payload: AdminReportResetRequest, request: Request
     targets = [payload.kind] if payload.kind in {"food", "water"} else ["food", "water"]
     for kind in targets:
         ACTIVE_REPORTS[kind] = {"active": False, "reporter": "", "updatedAt": now}
+        CARE_EMPTY_STREAK[kind] = 0
+        LAST_CARE_ALERT_AT[kind] = None
 
     actor = auth_placeholder_username(request, "Admin")
     msg = {
