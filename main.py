@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import random
 import shutil
 import uuid
 from contextlib import suppress
@@ -70,6 +71,14 @@ OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS = max(
     300,
     int(os.getenv("OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS", "3600")),
 )
+OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS = max(
+    30,
+    int(os.getenv("OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS", "45")),
+)
+OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS = max(
+    60,
+    int(os.getenv("OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS", "180")),
+)
 OOGWAY_TEXTS_STYLE = os.getenv("OOGWAY_TEXTS_STYLE", "auto").strip().lower()
 OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
     900,
@@ -135,6 +144,8 @@ LAST_BRAIN_MOTION_PROBES: dict[str, bytes] = {}
 LAST_BRAIN_CARE_CHECK_AT: datetime | None = None
 CARE_EMPTY_STREAK: dict[str, int] = {"food": 0, "water": 0}
 LAST_CARE_ALERT_AT: dict[str, datetime | None] = {"food": None, "water": None}
+LAST_EATING_CHECK_AT: datetime | None = None
+LAST_EATING_REACT_AT: datetime | None = None
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -798,6 +809,140 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, bool
         return {"food_empty": False, "water_empty": False}
 
 
+async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str, bool]:
+    if not snapshots:
+        return {"eating": False, "drinking": False}
+
+    user_content: list[dict[str, Any]] = [
+        {
+            "type": "text",
+            "text": (
+                "Look at these terrarium camera images and return only strict JSON: "
+                '{"eating": boolean, "drinking": boolean}. '
+                "Set eating=true only if the tortoise is clearly and actively eating food right now. "
+                "Set drinking=true only if the tortoise is clearly and actively drinking water right now. "
+                "If the tortoise is not visible, not near food/water, or the activity is ambiguous, use false."
+            ),
+        }
+    ]
+    for snapshot in snapshots:
+        user_content.append({"type": "text", "text": f"Camera view: {snapshot['label']}"})
+        user_content.append({"type": "image_url", "image_url": {"url": snapshot["dataUrl"]}})
+
+    payload = {
+        "model": OOGWAY_BRAIN_MODEL,
+        "temperature": 0.1,
+        "max_tokens": 80,
+        "messages": [
+            {
+                "role": "system",
+                "content": "You classify tortoise feeding and drinking behaviour from terrarium camera images.",
+            },
+            {"role": "user", "content": user_content},
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{GROQ_API_BASE.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+        if resp.status_code >= 400:
+            return {"eating": False, "drinking": False}
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        text = str(content)
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return {"eating": False, "drinking": False}
+        parsed = json.loads(text[start : end + 1])
+        return {
+            "eating": bool(parsed.get("eating", False)),
+            "drinking": bool(parsed.get("drinking", False)),
+        }
+    except Exception:
+        return {"eating": False, "drinking": False}
+
+
+_EATING_REACTIONS: list[str] = [
+    "mmm delicious~",
+    "nom nom nom",
+    "*chew chew*",
+    "oh that hits the spot",
+    "so good... so good",
+    "getting my nutrients",
+    "*munch munch*",
+    "lunch time",
+]
+
+_DRINKING_REACTIONS: list[str] = [
+    "*gulp* *gulp*",
+    "ah refreshing",
+    "*sip*",
+    "good water today",
+    "*slurp*",
+    "staying hydrated",
+    "nothing like a cold drink",
+]
+
+
+async def run_brain_eating_check() -> None:
+    global LAST_EATING_CHECK_AT, LAST_EATING_REACT_AT, LAST_BRAIN_SPOKE_AT
+
+    if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        return
+
+    if LAST_EATING_CHECK_AT:
+        elapsed = (now_utc() - LAST_EATING_CHECK_AT).total_seconds()
+        if elapsed < OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS:
+            return
+
+    LAST_EATING_CHECK_AT = now_utc()
+
+    if not LAST_BRAIN_MOVEMENT_AT:
+        return
+    if (now_utc() - LAST_BRAIN_MOVEMENT_AT).total_seconds() > OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS:
+        return
+
+    if LAST_EATING_REACT_AT:
+        if (now_utc() - LAST_EATING_REACT_AT).total_seconds() < OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS:
+            return
+
+    snapshots = await capture_brain_snapshots_data_urls()
+    if not snapshots:
+        return
+
+    result = await evaluate_eating_drinking(snapshots)
+
+    reaction: str | None = None
+    if result.get("drinking"):
+        reaction = random.choice(_DRINKING_REACTIONS)
+    elif result.get("eating"):
+        reaction = random.choice(_EATING_REACTIONS)
+
+    if not reaction:
+        return
+
+    msg = build_chat_item(
+        username=OOGWAY_BRAIN_NAME,
+        username_color=BRAIN_USERNAME_COLOR,
+        text=reaction,
+        kind="chat",
+    )
+    append_chat_log(msg)
+    await broadcast_chat(msg)
+    now = now_utc()
+    LAST_EATING_REACT_AT = now
+    LAST_BRAIN_SPOKE_AT = now
+
+
 def care_alert_on_cooldown(kind: str) -> bool:
     last = LAST_CARE_ALERT_AT.get(kind)
     if not last:
@@ -1007,11 +1152,16 @@ async def oogway_brain_loop() -> None:
     while True:
         try:
             await run_brain_care_check()
+            await run_brain_eating_check()
             await run_oogway_brain(trigger="periodic")
         except Exception:
             # Keep loop alive even if upstream LLM/camera calls fail.
             pass
-        await asyncio.sleep(min(OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS))
+        await asyncio.sleep(min(
+            OOGWAY_BRAIN_INTERVAL_SECONDS,
+            OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS,
+            OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS,
+        ))
 
 
 def get_local_tz() -> ZoneInfo:
