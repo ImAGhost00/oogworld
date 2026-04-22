@@ -78,34 +78,35 @@ services:
       - -c
       - |
         set -e
-        pulled_chat=0
-        for i in 1 2 3 4 5 6 7 8; do
-          if ollama pull "$OOGWAY_OLLAMA_MODEL"; then
-            pulled_chat=1
-            set -e
-            pull_with_retry() {
-              model_name="$1"
-              label="$2"
-              if [ -z "$model_name" ]; then
-                echo "${label} model not set, skipping"
-                return 0
-              fi
+        pull_with_retry() {
+          model_name="$1"
+          label="$2"
+          if [ -z "$model_name" ]; then
+            echo "${label} model not set, skipping"
+            return 0
+          fi
 
-              for i in 1 2 3 4 5 6 7 8; do
-                if ollama pull "$model_name"; then
-                  echo "pulled ${label} model: $model_name"
-                  return 0
-                fi
-                echo "${label} model pull failed (attempt $i), retrying..."
-                sleep 5
-              done
-
-              echo "warning: unable to pull ${label} model '$model_name' after retries; continuing"
+          for i in 1 2 3 4 5 6 7 8; do
+            if ollama pull "$model_name"; then
+              echo "pulled ${label} model: $model_name"
               return 0
-            }
+            fi
+            echo "${label} model pull failed (attempt $i), retrying..."
+            sleep 5
+          done
 
-            pull_with_retry "$OOGWAY_OLLAMA_MODEL" "chat"
-            pull_with_retry "$OOGWAY_OLLAMA_VISION_MODEL" "vision"
+          echo "warning: unable to pull ${label} model '$model_name' after retries; continuing"
+          return 0
+        }
+
+        pull_with_retry "$OOGWAY_OLLAMA_MODEL" "chat"
+        pull_with_retry "$OOGWAY_OLLAMA_VISION_MODEL" "vision"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: "no"
+
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:latest
     container_name: oogworld-syncthing
     environment:
       PUID: ${SYNCTHING_PUID:-1000}
