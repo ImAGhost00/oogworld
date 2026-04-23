@@ -377,17 +377,66 @@
 
     .daylight-banner {
       border: 1px solid rgba(126, 147, 124, 0.35);
-      border-radius: 10px;
-      padding: 9px 12px;
-      font-size: 13px;
-      color: #f0ebe5;
-      background: linear-gradient(140deg, rgba(62, 74, 61, 0.6), rgba(28, 42, 31, 0.72));
+      border-radius: 14px;
+      padding: 18px 24px 14px;
+      background: linear-gradient(140deg, rgba(62, 74, 61, 0.62), rgba(28, 42, 31, 0.76));
       margin-bottom: 10px;
       display: none;
+      text-align: center;
     }
 
     .daylight-banner.show {
       display: block;
+    }
+
+    .countdown-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #8cb88c;
+      margin-bottom: 10px;
+      font-weight: 600;
+    }
+
+    .countdown-digits {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .countdown-block {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 56px;
+    }
+
+    .countdown-num {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 46px;
+      font-weight: 700;
+      color: #f0ebe5;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .countdown-sep {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 40px;
+      font-weight: 300;
+      color: rgba(140, 184, 140, 0.45);
+      line-height: 1;
+      padding-bottom: 14px;
+      align-self: flex-end;
+    }
+
+    .countdown-unit {
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      color: #5a7a5a;
+      text-transform: uppercase;
+      margin-top: 3px;
     }
 
     .brand-overrun {
@@ -608,7 +657,25 @@
         </div>
       </header>
 
-      <div id="daylight-banner" class="daylight-banner"></div>
+      <div id="daylight-banner" class="daylight-banner">
+        <div id="countdown-label" class="countdown-label"></div>
+        <div class="countdown-digits">
+          <div class="countdown-block">
+            <span id="countdown-h" class="countdown-num">00</span>
+            <span class="countdown-unit">hrs</span>
+          </div>
+          <div class="countdown-sep">:</div>
+          <div class="countdown-block">
+            <span id="countdown-m" class="countdown-num">00</span>
+            <span class="countdown-unit">min</span>
+          </div>
+          <div class="countdown-sep">:</div>
+          <div class="countdown-block">
+            <span id="countdown-s" class="countdown-num">00</span>
+            <span class="countdown-unit">sec</span>
+          </div>
+        </div>
+      </div>
 
       <section class="grid gap-3 md:grid-cols-5">
         <article class="panel mobile-sticky-video overflow-hidden rounded-xl md:col-span-3">
@@ -750,13 +817,67 @@
       </div>
 
       <div id="admin-controls-view" class="hidden">
-        <p class="mb-3 text-xs text-slate-400">Reset alerts, clear chat, and delete individual messages directly from chat.</p>
+        <p class="mb-3 text-xs text-slate-400">Reset alerts, clear chat, and configure Oogway's AI brain.</p>
+
+        <!-- Moderation -->
         <div class="admin-grid mb-3">
           <button id="admin-reset-food" class="report-btn">Reset Food Alert</button>
           <button id="admin-reset-water" class="report-btn">Reset Water Alert</button>
           <button id="admin-reset-all" class="report-btn">Reset All Alerts</button>
           <button id="admin-clear-chat" class="report-btn">Clear Chat Log</button>
         </div>
+
+        <!-- AI Settings -->
+        <div style="border:1px solid rgba(126,184,126,0.25);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:rgba(28,42,31,0.45);">
+          <div class="mb-3 flex items-center justify-between">
+            <span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8cb88c;">AI Brain</span>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+              <span style="font-size:11px;color:#9ca3af;">Enabled</span>
+              <input id="ai-enabled-toggle" type="checkbox" style="accent-color:#4caf50;width:15px;height:15px;" />
+            </label>
+          </div>
+          <div style="display:grid;gap:8px;">
+            <div>
+              <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Chat Model</label>
+              <input id="ai-chat-model" type="text" placeholder="llama3.1:8b"
+                class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60" />
+            </div>
+            <div>
+              <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Vision Model</label>
+              <input id="ai-vision-model" type="text" placeholder="llama3.2-vision:latest"
+                class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60" />
+            </div>
+            <div>
+              <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Ollama Base URL</label>
+              <input id="ai-ollama-base" type="text" placeholder="http://ollama:11434"
+                class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60" />
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div>
+                <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Speak Every (s)</label>
+                <input id="ai-interval" type="number" min="45" step="15" placeholder="300"
+                  class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60" />
+              </div>
+              <div>
+                <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Mention Trigger</label>
+                <input id="ai-mention-trigger" type="text" placeholder="@oogway"
+                  class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60" />
+              </div>
+            </div>
+            <div>
+              <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Personality</label>
+              <textarea id="ai-personality" rows="3" placeholder="You are Oogway…"
+                class="mt-1 w-full rounded-lg border border-neutral-700 bg-black/40 px-3 py-1.5 text-sm outline-none focus:border-green-500/60"
+                style="resize:vertical;"></textarea>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button id="ai-save-btn" class="rounded-lg px-4 py-1.5 text-sm font-semibold"
+                style="background:rgba(76,175,80,0.18);border:1px solid rgba(76,175,80,0.4);color:#81c784;">Save AI Settings</button>
+              <span id="ai-save-status" style="font-size:11px;color:#6b7280;"></span>
+            </div>
+          </div>
+        </div>
+
         <button id="admin-logout-btn" class="w-full rounded-lg border border-red-500/40 bg-red-950/40 py-2 text-sm font-bold text-red-100">Logout</button>
       </div>
     </div>
@@ -818,6 +939,10 @@
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
         daylightBanner: document.getElementById("daylight-banner"),
+        countdownLabel: document.getElementById("countdown-label"),
+        countdownH: document.getElementById("countdown-h"),
+        countdownM: document.getElementById("countdown-m"),
+        countdownS: document.getElementById("countdown-s"),
         chatMessages: document.getElementById("chat-messages"),
         chatInput: document.getElementById("chat-input"),
         chatSend: document.getElementById("chat-send"),
@@ -858,6 +983,15 @@
         adminResetAll: document.getElementById("admin-reset-all"),
         adminClearChat: document.getElementById("admin-clear-chat"),
         adminLogoutBtn: document.getElementById("admin-logout-btn"),
+        aiEnabledToggle: document.getElementById("ai-enabled-toggle"),
+        aiChatModel: document.getElementById("ai-chat-model"),
+        aiVisionModel: document.getElementById("ai-vision-model"),
+        aiOllamaBase: document.getElementById("ai-ollama-base"),
+        aiInterval: document.getElementById("ai-interval"),
+        aiMentionTrigger: document.getElementById("ai-mention-trigger"),
+        aiPersonality: document.getElementById("ai-personality"),
+        aiSaveBtn: document.getElementById("ai-save-btn"),
+        aiSaveStatus: document.getElementById("ai-save-status"),
       };
 
       var reportBannerTimer = null;
@@ -1012,7 +1146,6 @@
         if (!state.daylight || state.daylight.cacheError) {
           setNightMode(false);
           el.daylightBanner.classList.remove("show");
-          el.daylightBanner.textContent = "";
           return;
         }
 
@@ -1021,22 +1154,31 @@
         var untilSunrise = Math.max(0, (state.daylight.secondsUntilSunrise || 0) - elapsed);
         var untilSunset = Math.max(0, (state.daylight.secondsUntilSunset || 0) - elapsed);
 
+        function setCountdown(secs, label) {
+          var s = Math.max(0, Math.floor(secs));
+          var h = Math.floor(s / 3600);
+          var m = Math.floor((s % 3600) / 60);
+          var sec = s % 60;
+          el.countdownLabel.textContent = label;
+          el.countdownH.textContent = String(h).padStart(2, "0");
+          el.countdownM.textContent = String(m).padStart(2, "0");
+          el.countdownS.textContent = String(sec).padStart(2, "0");
+          el.daylightBanner.classList.add("show");
+        }
+
         if (state.daylight.asleep) {
           setNightMode(true);
-          el.daylightBanner.textContent = "😴 oogway is asleep, his heatlamp will turn on in " + formatDuration(untilSunrise);
-          el.daylightBanner.classList.add("show");
+          setCountdown(untilSunrise, "😴 oogway is asleep — heatlamp on in");
           return;
         }
 
         setNightMode(false);
         if (state.daylight.bedtimeSoon) {
-          el.daylightBanner.textContent = "🌙 Bedtime countdown: Oogway's heatlamp turns off in " + formatDuration(untilSunset);
-          el.daylightBanner.classList.add("show");
+          setCountdown(untilSunset, "🌙 bedtime — heatlamp turns off in");
           return;
         }
 
         el.daylightBanner.classList.remove("show");
-        el.daylightBanner.textContent = "";
       }
 
       function getActiveStreamOption() {
@@ -1385,6 +1527,7 @@
           renderAdminView();
           redrawChatWithAdminControls();
           el.adminPasswordInput.value = "";
+          loadAiConfig();
         } catch (e) {
           alert("Admin login failed");
         }
@@ -1406,10 +1549,53 @@
       function openAdminModal() {
         renderAdminView();
         el.adminModal.classList.remove("hidden");
+        if (state.adminToken) loadAiConfig();
       }
 
       function closeAdminModal() {
         el.adminModal.classList.add("hidden");
+      }
+
+      async function loadAiConfig() {
+        if (!state.adminToken) return;
+        try {
+          var resp = await fetch("/api/admin/brain-config", { headers: authHeaders() });
+          if (!resp.ok) return;
+          var cfg = await resp.json();
+          el.aiEnabledToggle.checked = !!cfg.enabled;
+          el.aiChatModel.value = cfg.chatModel || "";
+          el.aiVisionModel.value = cfg.visionModel || "";
+          el.aiOllamaBase.value = cfg.ollamaBase || "";
+          el.aiInterval.value = cfg.intervalSeconds || 300;
+          el.aiMentionTrigger.value = cfg.mentionTrigger || "@oogway";
+          el.aiPersonality.value = cfg.personality || "";
+        } catch (e) { /* ignore */ }
+      }
+
+      async function saveAiConfig() {
+        if (!state.adminToken) return;
+        el.aiSaveStatus.textContent = "Saving…";
+        try {
+          var body = {
+            enabled: el.aiEnabledToggle.checked,
+            chatModel: el.aiChatModel.value.trim(),
+            visionModel: el.aiVisionModel.value.trim(),
+            ollamaBase: el.aiOllamaBase.value.trim(),
+            personality: el.aiPersonality.value.trim(),
+            intervalSeconds: parseInt(el.aiInterval.value, 10) || 300,
+            mentionTrigger: el.aiMentionTrigger.value.trim(),
+          };
+          var resp = await fetch("/api/admin/brain-config", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+            body: JSON.stringify(body),
+          });
+          if (!resp.ok) { el.aiSaveStatus.textContent = "Save failed"; return; }
+          el.aiSaveStatus.textContent = "Saved ✓";
+          setTimeout(function () { el.aiSaveStatus.textContent = ""; }, 2500);
+        } catch (e) {
+          el.aiSaveStatus.textContent = "Error";
+        }
       }
 
       async function adminResetReports(kind) {
@@ -1652,6 +1838,7 @@
       });
       el.adminClearChat.addEventListener("click", adminClearChat);
       el.adminLogoutBtn.addEventListener("click", adminLogout);
+      el.aiSaveBtn.addEventListener("click", saveAiConfig);
 
       el.chatMessages.addEventListener("click", function (e) {
         var target = e.target;

@@ -23,10 +23,10 @@ services:
       CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/chat_log.json}
       OOGWAY_BRAIN_ENABLED: ${OOGWAY_BRAIN_ENABLED:-false}
       OOGWAY_BRAIN_NAME: ${OOGWAY_BRAIN_NAME:-Oogway}
-      OOGWAY_BRAIN_MODEL: ${OOGWAY_BRAIN_MODEL:-qwen2.5:3b}
+      OOGWAY_BRAIN_MODEL: ${OOGWAY_BRAIN_MODEL:-llama3.1:8b}
       OOGWAY_OLLAMA_BASE: ${OOGWAY_OLLAMA_BASE:-http://ollama:11434}
-      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}
-      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}
+      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-llama3.1:8b}
+      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-llama3.2-vision:latest}
       OOGWAY_BRAIN_PERSONALITY: ${OOGWAY_BRAIN_PERSONALITY:-You are Oogway, a warm and observant tortoise who talks like a living terrarium companion.}
       OOGWAY_BRAIN_INTERVAL_SECONDS: ${OOGWAY_BRAIN_INTERVAL_SECONDS:-300}
       OOGWAY_BRAIN_MENTION_TRIGGER: ${OOGWAY_BRAIN_MENTION_TRIGGER:-@oogway}
@@ -66,8 +66,8 @@ services:
         condition: service_healthy
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}
-      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}
+      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-llama3.1:8b}
+      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-llama3.2-vision:latest}
     entrypoint:
       - /bin/sh
       - -c
@@ -94,8 +94,8 @@ services:
           return 0
         }
 
-        chat_model="${OOGWAY_OLLAMA_MODEL:-qwen2.5:3b}"
-        vision_model="${OOGWAY_OLLAMA_VISION_MODEL:-moondream:latest}"
+        chat_model="${OOGWAY_OLLAMA_MODEL:-llama3.1:8b}"
+        vision_model="${OOGWAY_OLLAMA_VISION_MODEL:-llama3.2-vision:latest}"
         pull_with_retry "$chat_model" "chat"
         pull_with_retry "$vision_model" "vision"
     volumes:

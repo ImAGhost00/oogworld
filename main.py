@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import random
 import re
@@ -44,11 +45,11 @@ OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower(
     "on",
 }
 OOGWAY_BRAIN_NAME = os.getenv("OOGWAY_BRAIN_NAME", "Oogway")
-OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "qwen2.5:3b").strip() or "qwen2.5:3b"
+OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
 OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip() or "http://ollama:11434"
 OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip() or OOGWAY_BRAIN_MODEL
 OOGWAY_OLLAMA_VISION_MODEL = (
-    os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "moondream:latest").strip() or "moondream:latest"
+    os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "llama3.2-vision:latest").strip() or "llama3.2-vision:latest"
 )
 OOGWAY_BRAIN_PERSONALITY = os.getenv(
     "OOGWAY_BRAIN_PERSONALITY",
@@ -90,10 +91,86 @@ OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
     900,
     int(os.getenv("OOGWAY_TEXTS_ANGER_AFTER_SECONDS", "14400")),
 )
+OOGWAY_LOG_LEVEL = os.getenv("OOGWAY_LOG_LEVEL", "INFO").strip().upper() or "INFO"
+OOGWAY_BRAIN_FILE_LOG_PATH = os.getenv("OOGWAY_BRAIN_FILE_LOG_PATH", "").strip()
 OOGWAY_OBSIDIAN_VAULT_PATH = Path(os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", BASE_DIR / "obsidian"))
 OOGWAY_OBSIDIAN_MEMORY_FOLDER = os.getenv("OOGWAY_OBSIDIAN_MEMORY_FOLDER", "Oogway Memory").strip() or "Oogway Memory"
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
 OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
+BRAIN_CONFIG_PATH = Path(os.getenv("BRAIN_CONFIG_PATH", BASE_DIR / "brain_config.json"))
+
+# ---------------------------------------------------------------------------
+# Brain config — runtime-mutable AI settings persisted to BRAIN_CONFIG_PATH.
+# On startup we load any saved overrides on top of the env-var defaults above.
+# ---------------------------------------------------------------------------
+_BRAIN_CONFIG_KEYS = {
+    "enabled": ("OOGWAY_BRAIN_ENABLED", bool),
+    "chatModel": ("OOGWAY_OLLAMA_MODEL", str),
+    "visionModel": ("OOGWAY_OLLAMA_VISION_MODEL", str),
+    "ollamaBase": ("OOGWAY_OLLAMA_BASE", str),
+    "personality": ("OOGWAY_BRAIN_PERSONALITY", str),
+    "intervalSeconds": ("OOGWAY_BRAIN_INTERVAL_SECONDS", int),
+    "mentionTrigger": ("OOGWAY_BRAIN_MENTION_TRIGGER", str),
+}
+
+def _load_brain_config() -> None:
+    """Load saved brain config from disk, overriding module-level globals."""
+    global OOGWAY_BRAIN_ENABLED, OOGWAY_OLLAMA_MODEL, OOGWAY_OLLAMA_VISION_MODEL
+    global OOGWAY_OLLAMA_BASE, OOGWAY_BRAIN_PERSONALITY
+    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER
+    if not BRAIN_CONFIG_PATH.exists():
+        return
+    with suppress(Exception):
+        raw = json.loads(BRAIN_CONFIG_PATH.read_text(encoding="utf-8"))
+        if "enabled" in raw:
+            OOGWAY_BRAIN_ENABLED = bool(raw["enabled"])
+        if raw.get("chatModel"):
+            OOGWAY_OLLAMA_MODEL = str(raw["chatModel"]).strip()
+        if raw.get("visionModel"):
+            OOGWAY_OLLAMA_VISION_MODEL = str(raw["visionModel"]).strip()
+        if raw.get("ollamaBase"):
+            OOGWAY_OLLAMA_BASE = str(raw["ollamaBase"]).strip()
+        if raw.get("personality"):
+            OOGWAY_BRAIN_PERSONALITY = str(raw["personality"]).strip()
+        if raw.get("intervalSeconds"):
+            OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(raw["intervalSeconds"]))
+        if raw.get("mentionTrigger"):
+            OOGWAY_BRAIN_MENTION_TRIGGER = str(raw["mentionTrigger"]).strip()
+
+def _save_brain_config() -> None:
+    """Persist current brain config globals to disk."""
+    with suppress(Exception):
+        BRAIN_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "enabled": OOGWAY_BRAIN_ENABLED,
+            "chatModel": OOGWAY_OLLAMA_MODEL,
+            "visionModel": OOGWAY_OLLAMA_VISION_MODEL,
+            "ollamaBase": OOGWAY_OLLAMA_BASE,
+            "personality": OOGWAY_BRAIN_PERSONALITY,
+            "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+            "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+        }
+        BRAIN_CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+_load_brain_config()
+
+_LOG_LEVEL = getattr(logging, OOGWAY_LOG_LEVEL, logging.INFO)
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+LOGGER = logging.getLogger("oogworld")
+BRAIN_LOGGER = logging.getLogger("oogworld.brain")
+
+if OOGWAY_BRAIN_FILE_LOG_PATH:
+    with suppress(Exception):
+        file_log_path = Path(OOGWAY_BRAIN_FILE_LOG_PATH)
+        file_log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(file_log_path, encoding="utf-8")
+        file_handler.setLevel(_LOG_LEVEL)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+        BRAIN_LOGGER.addHandler(file_handler)
+        LOGGER.addHandler(file_handler)
 
 _MEMORY_STOPWORDS = {
     "about",
@@ -118,6 +195,23 @@ _MEMORY_STOPWORDS = {
     "very",
     "with",
 }
+
+
+def brain_log(event: str, level: str = "info", **fields: Any) -> None:
+    payload = {
+        "event": event,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        **fields,
+    }
+    line = json.dumps(payload, default=str)
+    if level == "debug":
+        BRAIN_LOGGER.debug(line)
+    elif level == "warning":
+        BRAIN_LOGGER.warning(line)
+    elif level == "error":
+        BRAIN_LOGGER.error(line)
+    else:
+        BRAIN_LOGGER.info(line)
 
 ACTION_MESSAGE: dict[str, str] = {
     "Request Food": "OogWorld request: Please feed Oogway.",
@@ -573,8 +667,11 @@ def remember_memory_event(topic: str, note: str, trigger: str = "event", ts: str
         "note": note,
         "trigger": trigger,
     }
-    with suppress(Exception):
+    try:
         write_obsidian_memory_note(payload)
+        brain_log("memory.write.ok", topic=topic, trigger=trigger)
+    except Exception as exc:
+        brain_log("memory.write.error", level="error", topic=topic, trigger=trigger, error=str(exc))
 
 
 def read_recent_obsidian_memories(limit: int = 18) -> list[dict[str, str]]:
@@ -929,6 +1026,13 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
             image_payload.append(encoded)
 
     async def _chat_with(model_name: str, include_images: bool) -> str:
+        brain_log(
+            "ollama.chat.request",
+            model=model_name,
+            includeImages=include_images,
+            imageCount=len(image_payload) if include_images else 0,
+            promptChars=len(prompt_text),
+        )
         user_msg: dict[str, Any] = {"role": "user", "content": prompt_text}
         if include_images:
             user_msg["images"] = image_payload
@@ -939,14 +1043,26 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
                 {"role": "system", "content": system_prompt},
                 user_msg,
             ],
-            "options": {"temperature": 0.7, "num_predict": 160},
+            "options": {"temperature": 0.7, "num_predict": 280},
         }
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
+            body_excerpt = ""
+            with suppress(Exception):
+                body_excerpt = resp.text[:280]
+            brain_log(
+                "ollama.chat.http_error",
+                level="error",
+                model=model_name,
+                status=resp.status_code,
+                body=body_excerpt,
+            )
             return ""
         data = resp.json()
-        return str(data.get("message", {}).get("content", "")).strip()[:240]
+        reply = str(data.get("message", {}).get("content", "")).strip()[:400]
+        brain_log("ollama.chat.response", model=model_name, replyChars=len(reply))
+        return reply
 
     # Prefer vision model when images exist, then gracefully fall back to text model.
     if image_payload and OOGWAY_OLLAMA_VISION_MODEL:
@@ -954,10 +1070,12 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
             reply = await _chat_with(OOGWAY_OLLAMA_VISION_MODEL, include_images=True)
             if reply:
                 return reply
+        brain_log("ollama.chat.vision_fallback", level="warning", model=OOGWAY_OLLAMA_VISION_MODEL)
 
     try:
         return await _chat_with(OOGWAY_OLLAMA_MODEL, include_images=False)
-    except Exception:
+    except Exception as exc:
+        brain_log("ollama.chat.exception", level="error", model=OOGWAY_OLLAMA_MODEL, error=str(exc))
         return ""
 
 
@@ -969,14 +1087,17 @@ async def vision_json_classify(
 ) -> dict[str, bool]:
     defaults = {key: False for key in keys}
     if not snapshots:
+        brain_log("vision.classify.skip.no_snapshots", keys=keys, level="debug")
         return defaults
 
     if not OOGWAY_OLLAMA_VISION_MODEL:
+        brain_log("vision.classify.skip.no_model", keys=keys, level="warning")
         return defaults
 
     images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
     images = [img for img in images if img]
     if not images:
+        brain_log("vision.classify.skip.no_images", keys=keys, level="warning")
         return defaults
 
     try:
@@ -992,63 +1113,222 @@ async def vision_json_classify(
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
+            body_excerpt = ""
+            with suppress(Exception):
+                body_excerpt = resp.text[:280]
+            brain_log(
+                "vision.classify.http_error",
+                level="error",
+                status=resp.status_code,
+                keys=keys,
+                body=body_excerpt,
+            )
             return defaults
         content = resp.json().get("message", {}).get("content", "")
         parsed = _parse_json_from_text(str(content))
         if not parsed:
+            brain_log(
+                "vision.classify.parse_error",
+                level="warning",
+                keys=keys,
+                content=str(content)[:280],
+            )
             return defaults
-        return {key: bool(parsed.get(key, False)) for key in keys}
-    except Exception:
+        result = {key: bool(parsed.get(key, False)) for key in keys}
+        brain_log("vision.classify.ok", keys=keys, result=result)
+        return result
+    except Exception as exc:
+        brain_log("vision.classify.exception", level="error", keys=keys, error=str(exc))
         return defaults
 
 
-async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, bool]:
-    return await vision_json_classify(
-        snapshots=snapshots,
-        system_prompt="You classify food and water bowl visibility from terrarium camera images.",
-        task_prompt=(
-            "Inspect these terrarium camera views and return only strict JSON with this shape: "
-            '{"food_empty": boolean, "water_empty": boolean}. '
-            "Mark true only when it visibly appears empty or nearly empty. If unsure, use false."
-        ),
-        keys=["food_empty", "water_empty"],
+async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]:
+    """Returns food_level and water_level as one of: 'empty', 'low', 'medium', 'full'."""
+    _LEVEL_DEFAULTS: dict[str, Any] = {"food_level": "unknown", "water_level": "unknown", "food_empty": False, "water_empty": False}
+
+    if not snapshots:
+        brain_log("vision.care.skip.no_snapshots", level="debug")
+        return _LEVEL_DEFAULTS
+
+    if not OOGWAY_OLLAMA_VISION_MODEL:
+        brain_log("vision.care.skip.no_model", level="warning")
+        return _LEVEL_DEFAULTS
+
+    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
+    images = [img for img in images if img]
+    if not images:
+        brain_log("vision.care.skip.no_images", level="warning")
+        return _LEVEL_DEFAULTS
+
+    system_prompt = (
+        "You are a precise terrarium monitoring assistant. "
+        "You analyze camera images of a tortoise enclosure to assess food and water bowl fill levels."
     )
+    task_prompt = (
+        "Look carefully at the food dish and water dish in these terrarium camera images. "
+        "Estimate how full each container is. "
+        'Return ONLY strict JSON: {"food_level": "...", "water_level": "..."}. '
+        'Each level must be exactly one of: "empty", "low", "medium", "full". '
+        '"empty" = visibly empty or nearly empty (under 10% full). '
+        '"low" = noticeably low, needs refilling soon (10–35% full). '
+        '"medium" = partially filled, ok for now (35–70% full). '
+        '"full" = well-stocked or nearly full (over 70% full). '
+        "If a bowl is not visible or you cannot determine, use \"medium\" as a safe default."
+    )
+
+    try:
+        payload = {
+            "model": OOGWAY_OLLAMA_VISION_MODEL,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": task_prompt, "images": images},
+            ],
+            "options": {"temperature": 0.1, "num_predict": 60},
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            body_excerpt = ""
+            with suppress(Exception):
+                body_excerpt = resp.text[:280]
+            brain_log("vision.care.http_error", level="error", status=resp.status_code, body=body_excerpt)
+            return _LEVEL_DEFAULTS
+        content = resp.json().get("message", {}).get("content", "")
+        parsed = _parse_json_from_text(str(content))
+        if not parsed:
+            brain_log("vision.care.parse_error", level="warning", content=str(content)[:280])
+            return _LEVEL_DEFAULTS
+
+        _VALID_LEVELS = {"empty", "low", "medium", "full"}
+        food_level = str(parsed.get("food_level", "medium")).lower()
+        water_level = str(parsed.get("water_level", "medium")).lower()
+        if food_level not in _VALID_LEVELS:
+            food_level = "medium"
+        if water_level not in _VALID_LEVELS:
+            water_level = "medium"
+
+        result = {
+            "food_level": food_level,
+            "water_level": water_level,
+            "food_empty": food_level in ("empty", "low"),
+            "water_empty": water_level in ("empty", "low"),
+        }
+        brain_log("vision.care.ok", result=result)
+        return result
+    except Exception as exc:
+        brain_log("vision.care.exception", level="error", error=str(exc))
+        return _LEVEL_DEFAULTS
 
 
 async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str, bool]:
-    return await vision_json_classify(
-        snapshots=snapshots,
-        system_prompt="You classify tortoise feeding and drinking behaviour from terrarium camera images.",
-        task_prompt=(
-            "Look at these terrarium camera images and return only strict JSON: "
-            '{"eating": boolean, "drinking": boolean}. '
-            "Set eating=true only if the tortoise is clearly and actively eating food right now. "
-            "Set drinking=true only if the tortoise is clearly and actively drinking water right now. "
-            "If the tortoise is not visible, not near food/water, or the activity is ambiguous, use false."
-        ),
-        keys=["eating", "drinking"],
-    )
+    defaults = {
+        "scene_lit": False,
+        "tortoise_visible": False,
+        "near_food": False,
+        "near_water": False,
+        "eating": False,
+        "drinking": False,
+    }
+    if not snapshots:
+        brain_log("vision.behavior.skip.no_snapshots", level="debug")
+        return defaults
+    if not OOGWAY_OLLAMA_VISION_MODEL:
+        brain_log("vision.behavior.skip.no_model", level="warning")
+        return defaults
+
+    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
+    images = [img for img in images if img]
+    if not images:
+        brain_log("vision.behavior.skip.no_images", level="warning")
+        return defaults
+
+    payload = {
+        "model": OOGWAY_OLLAMA_VISION_MODEL,
+        "stream": False,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You classify tortoise behavior from terrarium images. "
+                    "Be conservative and avoid false positives."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Return ONLY strict JSON with keys: "
+                    '{"scene_lit": boolean, "tortoise_visible": boolean, "near_food": boolean, "near_water": boolean, "eating": boolean, "drinking": boolean}. '
+                    "Rules: if scene is dark/low-light or unclear, scene_lit=false and all other fields false. "
+                    "Set near_food=true only if tortoise is physically at the food dish. "
+                    "Set near_water=true only if tortoise is physically at the water dish. "
+                    "Set eating=true only when tortoise is clearly biting/chewing food and near_food=true. "
+                    "Set drinking=true only when tortoise is clearly sipping from water and near_water=true. "
+                    "If uncertain, return false."
+                ),
+                "images": images,
+            },
+        ],
+        "options": {"temperature": 0.0, "num_predict": 90},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            body_excerpt = ""
+            with suppress(Exception):
+                body_excerpt = resp.text[:280]
+            brain_log("vision.behavior.http_error", level="error", status=resp.status_code, body=body_excerpt)
+            return defaults
+
+        content = resp.json().get("message", {}).get("content", "")
+        parsed = _parse_json_from_text(str(content))
+        if not parsed:
+            brain_log("vision.behavior.parse_error", level="warning", content=str(content)[:280])
+            return defaults
+
+        result = {
+            "scene_lit": bool(parsed.get("scene_lit", False)),
+            "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
+            "near_food": bool(parsed.get("near_food", False)),
+            "near_water": bool(parsed.get("near_water", False)),
+            "eating": bool(parsed.get("eating", False)),
+            "drinking": bool(parsed.get("drinking", False)),
+        }
+
+        # Hard guardrails to suppress hallucinated behavior calls.
+        if not result["scene_lit"] or not result["tortoise_visible"]:
+            result["near_food"] = False
+            result["near_water"] = False
+            result["eating"] = False
+            result["drinking"] = False
+        if not result["near_food"]:
+            result["eating"] = False
+        if not result["near_water"]:
+            result["drinking"] = False
+
+        brain_log("vision.behavior.ok", result=result)
+        return result
+    except Exception as exc:
+        brain_log("vision.behavior.exception", level="error", error=str(exc))
+        return defaults
 
 
 _EATING_REACTIONS: list[str] = [
-    "mmm delicious~",
-    "nom nom nom",
-    "*chew chew*",
-    "oh that hits the spot",
-    "so good... so good",
-    "getting my nutrients",
-    "*munch munch*",
-    "lunch time",
+    "*munch* *munch*",
+    "munch munch",
+    "*munch munch munch*",
+    "mmm... munching",
+    "munch time",
 ]
 
 _DRINKING_REACTIONS: list[str] = [
-    "*gulp* *gulp*",
-    "ah refreshing",
     "*sip*",
-    "good water today",
-    "*slurp*",
-    "staying hydrated",
-    "nothing like a cold drink",
+    "*sip sip*",
+    "sip sip sip",
+    "*sip... ahh*",
+    "hydration sip",
 ]
 
 
@@ -1056,29 +1336,47 @@ async def run_brain_eating_check() -> None:
     global LAST_EATING_CHECK_AT, LAST_EATING_REACT_AT, LAST_BRAIN_SPOKE_AT
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        brain_log("brain.eating.skip.not_configured", level="debug")
+        return
+
+    if not brain_awake_now():
+        brain_log("brain.eating.skip.asleep", level="debug")
         return
 
     if LAST_EATING_CHECK_AT:
         elapsed = (now_utc() - LAST_EATING_CHECK_AT).total_seconds()
         if elapsed < OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS:
+            brain_log("brain.eating.skip.interval", elapsed=elapsed, needed=OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS, level="debug")
             return
 
     LAST_EATING_CHECK_AT = now_utc()
 
     if not LAST_BRAIN_MOVEMENT_AT:
+        brain_log("brain.eating.skip.no_movement_history", level="debug")
         return
     if (now_utc() - LAST_BRAIN_MOVEMENT_AT).total_seconds() > OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS:
+        brain_log("brain.eating.skip.movement_stale", level="debug")
         return
 
     if LAST_EATING_REACT_AT:
         if (now_utc() - LAST_EATING_REACT_AT).total_seconds() < OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS:
+            brain_log("brain.eating.skip.cooldown", level="debug")
             return
 
     snapshots = await capture_brain_snapshots_data_urls()
     if not snapshots:
+        brain_log("brain.eating.skip.no_snapshots", level="warning")
         return
 
     result = await evaluate_eating_drinking(snapshots)
+    brain_log("brain.eating.classified", result=result)
+
+    if not result.get("scene_lit"):
+        brain_log("brain.eating.skip.dark_scene", level="debug")
+        return
+    if not result.get("tortoise_visible"):
+        brain_log("brain.eating.skip.not_visible", level="debug")
+        return
 
     reaction: str | None = None
     if result.get("drinking"):
@@ -1087,6 +1385,7 @@ async def run_brain_eating_check() -> None:
         reaction = random.choice(_EATING_REACTIONS)
 
     if not reaction:
+        brain_log("brain.eating.skip.no_reaction", level="debug")
         return
 
     msg = build_chat_item(
@@ -1185,6 +1484,7 @@ async def emit_oogway_care_alert(kind: Literal["food", "water"], reminder: bool 
     }
     append_chat_log(chat_item)
     await broadcast_chat(chat_item)
+    brain_log("brain.care.alert", kind=kind, reminder=reminder, text=chat_text)
     remember_memory_event(
         topic=f"care-{kind}",
         note=f"Oogway care alert ({'reminder' if reminder else 'new'}): {chat_text}",
@@ -1209,11 +1509,17 @@ async def run_brain_care_check() -> None:
     global LAST_BRAIN_CARE_CHECK_AT
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        brain_log("brain.care.skip.not_configured", level="debug")
+        return
+
+    if not brain_awake_now():
+        brain_log("brain.care.skip.asleep", level="debug")
         return
 
     if LAST_BRAIN_CARE_CHECK_AT:
         elapsed = (now_utc() - LAST_BRAIN_CARE_CHECK_AT).total_seconds()
         if elapsed < OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS:
+            brain_log("brain.care.skip.interval", elapsed=elapsed, needed=OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS, level="debug")
             return
 
     LAST_BRAIN_CARE_CHECK_AT = now_utc()
@@ -1221,6 +1527,14 @@ async def run_brain_care_check() -> None:
     movement_recent = await refresh_brain_motion_state()
     snapshots = await capture_brain_snapshots_data_urls()
     care_eval = await evaluate_care_needs(snapshots)
+    brain_log(
+        "brain.care.classified",
+        movementRecent=movement_recent,
+        foodLevel=care_eval.get("food_level", "unknown"),
+        waterLevel=care_eval.get("water_level", "unknown"),
+        foodEmpty=care_eval.get("food_empty", False),
+        waterEmpty=care_eval.get("water_empty", False),
+    )
 
     for kind in ["food", "water"]:
         empty_flag = care_eval.get(f"{kind}_empty", False)
@@ -1279,6 +1593,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
     global LAST_BRAIN_SPOKE_AT
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        brain_log("brain.reply.skip.not_configured", trigger=trigger, level="warning")
         return
 
     async with BRAIN_LOCK:
@@ -1286,21 +1601,23 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
             await refresh_daylight_cache(force=False)
 
         if not brain_awake_now():
+            brain_log("brain.reply.skip.asleep", trigger=trigger, level="debug")
             return
 
         if trigger == "periodic" and LAST_BRAIN_SPOKE_AT:
             elapsed = (now_utc() - LAST_BRAIN_SPOKE_AT).total_seconds()
             if elapsed < OOGWAY_BRAIN_INTERVAL_SECONDS:
+                brain_log("brain.reply.skip.interval", trigger=trigger, elapsed=elapsed, needed=OOGWAY_BRAIN_INTERVAL_SECONDS, level="debug")
                 return
 
         movement_recent = await refresh_brain_motion_state()
-        if trigger == "periodic" and not movement_recent:
-            return
 
         prompt_text = build_oogway_prompt(trigger, source_message)
         snapshots = await capture_brain_snapshots_data_urls()
+        brain_log("brain.reply.request", trigger=trigger, snapshots=len(snapshots), promptChars=len(prompt_text))
         reply = await call_ollama_for_oogway(prompt_text, snapshots)
         if not reply:
+            brain_log("brain.reply.empty", trigger=trigger, level="warning")
             return
 
         msg = build_chat_item(
@@ -1312,6 +1629,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
         append_chat_log(msg)
         await broadcast_chat(msg)
         remember_interaction(trigger, source_message, reply)
+        brain_log("brain.reply.sent", trigger=trigger, reply=reply)
         LAST_BRAIN_SPOKE_AT = now_utc()
 
 
@@ -1479,8 +1797,21 @@ async def startup() -> None:
     await refresh_daylight_cache(force=True)
     global DAYLIGHT_TASK, BRAIN_TASK
     DAYLIGHT_TASK = asyncio.create_task(daylight_refresh_loop())
+    brain_log(
+        "brain.startup",
+        enabled=OOGWAY_BRAIN_ENABLED,
+        configured=is_brain_configured(),
+        model=OOGWAY_OLLAMA_MODEL,
+        visionModel=OOGWAY_OLLAMA_VISION_MODEL,
+        ollamaBase=OOGWAY_OLLAMA_BASE,
+        mentionTrigger=OOGWAY_BRAIN_MENTION_TRIGGER,
+        cameraKey=OOGWAY_BRAIN_CAMERA_KEY,
+    )
     if OOGWAY_BRAIN_ENABLED and is_brain_configured():
         BRAIN_TASK = asyncio.create_task(oogway_brain_loop())
+        brain_log("brain.loop.started")
+    else:
+        brain_log("brain.loop.not_started", level="warning")
 
 
 @app.on_event("shutdown")
@@ -1647,6 +1978,68 @@ async def admin_reset_reports(payload: AdminReportResetRequest, request: Request
     return {"ok": True, "items": ACTIVE_REPORTS}
 
 
+class BrainConfigUpdate(BaseModel):
+    enabled: bool | None = None
+    chatModel: str | None = None
+    visionModel: str | None = None
+    ollamaBase: str | None = None
+    personality: str | None = None
+    intervalSeconds: int | None = None
+    mentionTrigger: str | None = None
+
+
+@app.get("/api/admin/brain-config")
+def get_brain_config(request: Request) -> dict[str, Any]:
+    require_admin(request)
+    return {
+        "enabled": OOGWAY_BRAIN_ENABLED,
+        "chatModel": OOGWAY_OLLAMA_MODEL,
+        "visionModel": OOGWAY_OLLAMA_VISION_MODEL,
+        "ollamaBase": OOGWAY_OLLAMA_BASE,
+        "personality": OOGWAY_BRAIN_PERSONALITY,
+        "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+        "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+    }
+
+
+@app.post("/api/admin/brain-config")
+def update_brain_config(payload: BrainConfigUpdate, request: Request) -> dict[str, Any]:
+    global OOGWAY_BRAIN_ENABLED, OOGWAY_OLLAMA_MODEL, OOGWAY_OLLAMA_VISION_MODEL
+    global OOGWAY_OLLAMA_BASE, OOGWAY_BRAIN_PERSONALITY
+    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER
+    require_admin(request)
+
+    if payload.enabled is not None:
+        OOGWAY_BRAIN_ENABLED = bool(payload.enabled)
+    if payload.chatModel is not None and payload.chatModel.strip():
+        OOGWAY_OLLAMA_MODEL = payload.chatModel.strip()
+    if payload.visionModel is not None and payload.visionModel.strip():
+        OOGWAY_OLLAMA_VISION_MODEL = payload.visionModel.strip()
+    if payload.ollamaBase is not None and payload.ollamaBase.strip():
+        OOGWAY_OLLAMA_BASE = payload.ollamaBase.strip()
+    if payload.personality is not None and payload.personality.strip():
+        OOGWAY_BRAIN_PERSONALITY = payload.personality.strip()
+    if payload.intervalSeconds is not None:
+        OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(payload.intervalSeconds))
+    if payload.mentionTrigger is not None and payload.mentionTrigger.strip():
+        OOGWAY_BRAIN_MENTION_TRIGGER = payload.mentionTrigger.strip()
+
+    _save_brain_config()
+    brain_log("brain.config.updated", enabled=OOGWAY_BRAIN_ENABLED, chatModel=OOGWAY_OLLAMA_MODEL,
+              visionModel=OOGWAY_OLLAMA_VISION_MODEL, ollamaBase=OOGWAY_OLLAMA_BASE,
+              intervalSeconds=OOGWAY_BRAIN_INTERVAL_SECONDS, mentionTrigger=OOGWAY_BRAIN_MENTION_TRIGGER)
+    return {
+        "ok": True,
+        "enabled": OOGWAY_BRAIN_ENABLED,
+        "chatModel": OOGWAY_OLLAMA_MODEL,
+        "visionModel": OOGWAY_OLLAMA_VISION_MODEL,
+        "ollamaBase": OOGWAY_OLLAMA_BASE,
+        "personality": OOGWAY_BRAIN_PERSONALITY,
+        "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+        "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+    }
+
+
 @app.websocket("/ws/chat")
 async def chat_ws(
     ws: WebSocket,
@@ -1693,6 +2086,11 @@ async def chat_ws(
 
             is_self = safe_name.lower() == OOGWAY_BRAIN_NAME.lower()
             if OOGWAY_BRAIN_ENABLED and is_brain_configured() and (not is_self) and should_trigger_oogway_mention(text):
+                brain_log(
+                    "brain.mention.detected",
+                    user=safe_name,
+                    text=text[:180],
+                )
                 asyncio.create_task(run_oogway_brain(trigger="mention", source_message=msg))
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)
