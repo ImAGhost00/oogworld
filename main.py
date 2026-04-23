@@ -643,16 +643,42 @@ def append_to_people_index(person_note_title: str) -> None:
         index_path.write_text(current, encoding="utf-8")
 
 
-def append_person_profile_learning(person_name: str, note: str, ts: str | None = None) -> None:
-    safe_name = canonical_username(person_name)
-    if not safe_name or safe_name.lower() == OOGWAY_BRAIN_NAME.lower():
-        return
+def _extract_interaction_history_lines(content: str) -> list[str]:
+    lines: list[str] = []
+    in_section = False
+    for raw in content.splitlines():
+        line = raw.strip()
+        if line == "## Interaction History":
+            in_section = True
+            continue
+        if in_section and line.startswith("## "):
+            break
+        if in_section and line.startswith("- "):
+            lines.append(line)
+    return lines
 
-    directory = ensure_obsidian_memory_dir()
-    title = f"Profile - {safe_name}"
+
+def _ensure_interaction_history_section(content: str) -> str:
+    if "## Interaction History" in content:
+        return content
+    if not content.endswith("\n"):
+        content += "\n"
+    return content + "\n## Interaction History\n"
+
+
+def _merge_legacy_profile_if_needed(directory: Path, safe_name: str) -> tuple[str, Path, str]:
+    title = f"Profile {safe_name}"
+    legacy_title = f"Profile - {safe_name}"
     profile_path = directory / f"{slugify_note_title(title)}.md"
+    legacy_path = directory / f"{slugify_note_title(legacy_title)}.md"
+
+    current = ""
     if profile_path.exists():
         current = profile_path.read_text(encoding="utf-8")
+    elif legacy_path.exists():
+        current = legacy_path.read_text(encoding="utf-8")
+        if current.startswith(f"# {legacy_title}"):
+            current = current.replace(f"# {legacy_title}", f"# {title}", 1)
     else:
         current = "\n".join(
             [
@@ -665,6 +691,33 @@ def append_person_profile_learning(person_name: str, note: str, ts: str | None =
                 "",
             ]
         )
+
+    if profile_path.exists() and legacy_path.exists():
+        merged = _ensure_interaction_history_section(current)
+        existing_lines = set(_extract_interaction_history_lines(merged))
+        for line in _extract_interaction_history_lines(legacy_path.read_text(encoding="utf-8")):
+            if line not in existing_lines:
+                if not merged.endswith("\n"):
+                    merged += "\n"
+                merged += line + "\n"
+                existing_lines.add(line)
+        current = merged
+
+    profile_path.write_text(current, encoding="utf-8")
+    if legacy_path.exists():
+        with suppress(Exception):
+            legacy_path.unlink()
+
+    return title, profile_path, current
+
+
+def append_person_profile_learning(person_name: str, note: str, ts: str | None = None) -> None:
+    safe_name = canonical_username(person_name)
+    if not safe_name or safe_name.lower() == OOGWAY_BRAIN_NAME.lower():
+        return
+
+    directory = ensure_obsidian_memory_dir()
+    title, profile_path, current = _merge_legacy_profile_if_needed(directory, safe_name)
 
     timestamp = local_obsidian_timestamp(ts)
     line = f"- {timestamp} {note[:180]}"
@@ -679,6 +732,14 @@ def append_person_profile_learning(person_name: str, note: str, ts: str | None =
         profile_path.write_text(current, encoding="utf-8")
 
     append_to_people_index(title)
+    people_index_path = directory / "People Index.md"
+    if people_index_path.exists():
+        people_index = people_index_path.read_text(encoding="utf-8")
+        old_bullet = f"- [[Profile - {safe_name}]]"
+        if old_bullet in people_index:
+            people_index = people_index.replace(old_bullet + "\n", "")
+            people_index = people_index.replace(old_bullet, "")
+            people_index_path.write_text(people_index, encoding="utf-8")
 
 
 def append_personality_learning(note: str, ts: str | None = None) -> None:
