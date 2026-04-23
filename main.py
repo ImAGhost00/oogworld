@@ -45,9 +45,8 @@ OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower(
     "on",
 }
 OOGWAY_BRAIN_NAME = os.getenv("OOGWAY_BRAIN_NAME", "Oogway")
-OOGWAY_BRAIN_MODEL = os.getenv("OOGWAY_BRAIN_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
 OOGWAY_OLLAMA_BASE = os.getenv("OOGWAY_OLLAMA_BASE", "http://ollama:11434").strip() or "http://ollama:11434"
-OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", OOGWAY_BRAIN_MODEL).strip() or OOGWAY_BRAIN_MODEL
+OOGWAY_OLLAMA_MODEL = os.getenv("OOGWAY_OLLAMA_MODEL", "llama3.1:8b").strip() or "llama3.1:8b"
 OOGWAY_OLLAMA_VISION_MODEL = (
     os.getenv("OOGWAY_OLLAMA_VISION_MODEL", "llama3.2-vision:latest").strip() or "llama3.2-vision:latest"
 )
@@ -85,6 +84,14 @@ OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS = max(
 OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS = max(
     60,
     int(os.getenv("OOGWAY_BRAIN_EATING_REACT_COOLDOWN_SECONDS", "180")),
+)
+OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS = max(
+    30,
+    int(os.getenv("OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS", "60")),
+)
+OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS = max(
+    300,
+    int(os.getenv("OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS", "1800")),
 )
 OOGWAY_TEXTS_STYLE = os.getenv("OOGWAY_TEXTS_STYLE", "auto").strip().lower()
 OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
@@ -268,6 +275,11 @@ CARE_EMPTY_STREAK: dict[str, int] = {"food": 0, "water": 0}
 LAST_CARE_ALERT_AT: dict[str, datetime | None] = {"food": None, "water": None}
 LAST_EATING_CHECK_AT: datetime | None = None
 LAST_EATING_REACT_AT: datetime | None = None
+LAST_BEHAVIOR_CHECK_AT: datetime | None = None
+LAST_HUT_STATE: bool | None = None
+LAST_FALLEN_ALERT_AT: datetime | None = None
+LAST_CARE_OBSERVATION_AT: datetime | None = None
+_CARE_OBSERVATION_INTERVAL_SECONDS = 1800  # log bowl levels to journal every 30 min max
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -593,6 +605,22 @@ def append_to_obsidian_topic(topic_title: str, note_title: str, note_text: str) 
         topic_path.write_text(current, encoding="utf-8")
 
 
+def append_to_daily_journal(date_str: str, note_title: str, topic: str, note_text: str, time_str: str) -> None:
+    """Append a timestamped bullet to the daily journal note for the given date."""
+    directory = ensure_obsidian_memory_dir()
+    journal_title = f"Daily Log - {date_str}"
+    journal_path = directory / f"{slugify_note_title(journal_title)}.md"
+    if journal_path.exists():
+        current = journal_path.read_text(encoding="utf-8")
+    else:
+        current = f"# {journal_title}\n\n## Events\n"
+    bullet = f"- `{time_str}` **{topic}** [[{note_title}]] {note_text[:100]}"
+    if not current.endswith("\n"):
+        current += "\n"
+    current += bullet + "\n"
+    journal_path.write_text(current, encoding="utf-8")
+
+
 def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     ts = str(item.get("ts") or datetime.now(timezone.utc).isoformat())
     topic = str(item.get("topic") or "memory").strip() or "memory"
@@ -604,16 +632,19 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     directory = ensure_obsidian_memory_dir()
     short_id = str(uuid.uuid4())[:8]
     date_prefix = ts[:10]
+    time_str = ts[11:19] if len(ts) >= 19 else ""
     note_title = f"{date_prefix} {topic} {short_id}"
     note_path = directory / f"{slugify_note_title(note_title)}.md"
 
+    daily_title = f"Daily Log - {date_prefix}"
+
     recalls = search_obsidian_memories(f"{topic} {note_text}", limit=3)
-    links = [f"[[Topic - {topic.title()}]]"]
+    links = [f"[[Topic - {topic.title()}]]", f"[[{daily_title}]]"]
     for recall in recalls:
         candidate = recall.get("title", "")
         if candidate and candidate != note_title:
             links.append(f"[[{candidate}]]")
-    links = list(dict.fromkeys(links))[:5]
+    links = list(dict.fromkeys(links))[:6]
 
     body = "\n".join(
         [
@@ -631,6 +662,7 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     )
     note_path.write_text(body, encoding="utf-8")
     append_to_obsidian_topic(f"Topic - {topic.title()}", note_title, note_text)
+    append_to_daily_journal(date_prefix, note_title, topic, note_text, time_str)
 
 
 def read_action_log() -> list[dict[str, Any]]:
@@ -1315,6 +1347,82 @@ async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str,
         return defaults
 
 
+async def evaluate_behavior_state(snapshots: list[dict[str, str]]) -> dict[str, bool]:
+    """Classify tortoise location (in/out of hut) and whether it has fallen over."""
+    defaults: dict[str, bool] = {
+        "scene_lit": False,
+        "tortoise_visible": False,
+        "in_hut": False,
+        "fallen_over": False,
+    }
+    if not snapshots or not OOGWAY_OLLAMA_VISION_MODEL:
+        return defaults
+
+    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
+    images = [img for img in images if img]
+    if not images:
+        return defaults
+
+    payload = {
+        "model": OOGWAY_OLLAMA_VISION_MODEL,
+        "stream": False,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a precise terrarium monitor. "
+                    "Analyze tortoise position and posture in the camera images. "
+                    "Be conservative — only report true when clearly visible."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Return ONLY strict JSON with these keys: "
+                    '{"scene_lit": boolean, "tortoise_visible": boolean, "in_hut": boolean, "fallen_over": boolean}. '
+                    "scene_lit: true if the enclosure is well lit and clearly visible. "
+                    "tortoise_visible: true if you can clearly see the tortoise. "
+                    "in_hut: true if the tortoise is inside or entering the wooden/hide hut structure. "
+                    "fallen_over: true if the tortoise appears to be on its side or upside down (flipped). "
+                    "If uncertain about any field, return false."
+                ),
+                "images": images,
+            },
+        ],
+        "options": {"temperature": 0.0, "num_predict": 80},
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            brain_log("vision.state.http_error", level="error", status=resp.status_code)
+            return defaults
+
+        content = resp.json().get("message", {}).get("content", "")
+        parsed = _parse_json_from_text(str(content))
+        if not parsed:
+            brain_log("vision.state.parse_error", level="warning", content=str(content)[:280])
+            return defaults
+
+        result: dict[str, bool] = {
+            "scene_lit": bool(parsed.get("scene_lit", False)),
+            "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
+            "in_hut": bool(parsed.get("in_hut", False)),
+            "fallen_over": bool(parsed.get("fallen_over", False)),
+        }
+        # Hard guardrail: suppress all positional flags when dark or tortoise not visible
+        if not result["scene_lit"] or not result["tortoise_visible"]:
+            result["in_hut"] = False
+            result["fallen_over"] = False
+
+        brain_log("vision.state.ok", result=result)
+        return result
+    except Exception as exc:
+        brain_log("vision.state.exception", level="error", error=str(exc))
+        return defaults
+
+
 _EATING_REACTIONS: list[str] = [
     "*munch* *munch*",
     "munch munch",
@@ -1329,6 +1437,19 @@ _DRINKING_REACTIONS: list[str] = [
     "sip sip sip",
     "*sip... ahh*",
     "hydration sip",
+]
+
+_SLEEP_REACTIONS: list[str] = [
+    "zzz...",
+    "*zzz*",
+    "zzzz...",
+    "zzz mmm kale zzzz",
+    "mmm... warm rock... zzz",
+    "zzz... lettuce... zzz",
+    "z... z... basking... zzzz",
+    "*snore* ...dandelion... *snore*",
+    "zzz mmm strawberry zzz",
+    "...zzzz...",
 ]
 
 
@@ -1536,6 +1657,23 @@ async def run_brain_care_check() -> None:
         waterEmpty=care_eval.get("water_empty", False),
     )
 
+    food_level = care_eval.get("food_level", "unknown")
+    water_level = care_eval.get("water_level", "unknown")
+
+    # Log a passive care observation to the daily journal — throttled to every 30 min
+    global LAST_CARE_OBSERVATION_AT
+    obs_due = (
+        LAST_CARE_OBSERVATION_AT is None
+        or (now_utc() - LAST_CARE_OBSERVATION_AT).total_seconds() >= _CARE_OBSERVATION_INTERVAL_SECONDS
+    )
+    if obs_due and (food_level != "unknown" or water_level != "unknown"):
+        remember_memory_event(
+            topic="care-observation",
+            note=f"Vision check: food bowl is {food_level}, water bowl is {water_level}.",
+            trigger="vision-care",
+        )
+        LAST_CARE_OBSERVATION_AT = now_utc()
+
     for kind in ["food", "water"]:
         empty_flag = care_eval.get(f"{kind}_empty", False)
         CARE_EMPTY_STREAK[kind] = (CARE_EMPTY_STREAK[kind] + 1) if empty_flag else 0
@@ -1601,7 +1739,19 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
             await refresh_daylight_cache(force=False)
 
         if not brain_awake_now():
-            brain_log("brain.reply.skip.asleep", trigger=trigger, level="debug")
+            if trigger == "mention":
+                sleepy = random.choice(_SLEEP_REACTIONS)
+                brain_log("brain.reply.sleeping", trigger=trigger, reply=sleepy)
+                msg = build_chat_item(
+                    username=OOGWAY_BRAIN_NAME,
+                    username_color=BRAIN_USERNAME_COLOR,
+                    text=sleepy,
+                    kind="chat",
+                )
+                append_chat_log(msg)
+                await broadcast_chat(msg)
+            else:
+                brain_log("brain.reply.skip.asleep", trigger=trigger, level="debug")
             return
 
         if trigger == "periodic" and LAST_BRAIN_SPOKE_AT:
@@ -1633,12 +1783,86 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
         LAST_BRAIN_SPOKE_AT = now_utc()
 
 
+async def run_brain_behavior_check() -> None:
+    """Periodic vision check for hut entry/exit, fallen over, fed, watered — logs everything to Obsidian."""
+    global LAST_BEHAVIOR_CHECK_AT, LAST_HUT_STATE, LAST_FALLEN_ALERT_AT
+
+    if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
+        return
+
+    if not brain_awake_now():
+        return
+
+    if LAST_BEHAVIOR_CHECK_AT:
+        elapsed = (now_utc() - LAST_BEHAVIOR_CHECK_AT).total_seconds()
+        if elapsed < OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS:
+            return
+
+    LAST_BEHAVIOR_CHECK_AT = now_utc()
+
+    snapshots = await capture_brain_snapshots_data_urls()
+    if not snapshots:
+        return
+
+    state = await evaluate_behavior_state(snapshots)
+    brain_log("brain.behavior.classified", state=state)
+
+    if not state.get("scene_lit") or not state.get("tortoise_visible"):
+        return
+
+    now_dt = now_utc()
+    now_iso = now_dt.isoformat()
+
+    # --- Hut entry / exit transition ---
+    in_hut_now = state.get("in_hut", False)
+    if LAST_HUT_STATE is not None and in_hut_now != LAST_HUT_STATE:
+        if in_hut_now:
+            event_note = "Oogway entered the hut."
+            topic = "hut-entry"
+        else:
+            event_note = "Oogway left the hut and is out exploring."
+            topic = "hut-exit"
+        remember_memory_event(topic=topic, note=event_note, trigger="vision-behavior", ts=now_iso)
+        brain_log("brain.behavior.hut_transition", in_hut=in_hut_now)
+    LAST_HUT_STATE = in_hut_now
+
+    # --- Fallen over alert ---
+    if state.get("fallen_over"):
+        fallen_ok = (
+            LAST_FALLEN_ALERT_AT is None
+            or (now_dt - LAST_FALLEN_ALERT_AT).total_seconds() >= OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS
+        )
+        if fallen_ok:
+            fallen_note = "Oogway appears to have flipped over and may need help!"
+            remember_memory_event(topic="fallen", note=fallen_note, trigger="vision-behavior", ts=now_iso)
+            msg = build_chat_item(
+                username=OOGWAY_BRAIN_NAME,
+                username_color=BRAIN_USERNAME_COLOR,
+                text="i think i fell over... help?",
+                kind="chat",
+            )
+            append_chat_log(msg)
+            await broadcast_chat(msg)
+            if OOGWAY_TEXTS_TOPIC:
+                with suppress(Exception):
+                    await send_ntfy_message(
+                        OOGWAY_TEXTS_TOPIC,
+                        f"⚠️ {OOGWAY_BRAIN_NAME} appears to have flipped over and needs help!",
+                        title=f"Emergency — {OOGWAY_BRAIN_NAME} fell over",
+                        priority="high",
+                        tags="turtle,emergency,fallen",
+                    )
+            LAST_FALLEN_ALERT_AT = now_dt
+            brain_log("brain.behavior.fallen_alert")
+
+
 async def oogway_brain_loop() -> None:
     await asyncio.sleep(20)
     while True:
         try:
             await run_brain_care_check()
             await run_brain_eating_check()
+            await run_brain_behavior_check()
             await run_oogway_brain(trigger="periodic")
         except Exception:
             # Keep loop alive even if upstream LLM/camera calls fail.
@@ -1647,6 +1871,7 @@ async def oogway_brain_loop() -> None:
             OOGWAY_BRAIN_INTERVAL_SECONDS,
             OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS,
             OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS,
+            OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS,
         ))
 
 
@@ -1854,7 +2079,7 @@ async def health() -> dict[str, Any]:
         "adminConfigured": "yes" if ADMIN_PASSWORD else "no",
         "brainEnabled": "yes" if OOGWAY_BRAIN_ENABLED else "no",
         "brainConfigured": "yes" if is_brain_configured() else "no",
-        "brainModel": OOGWAY_BRAIN_MODEL,
+        "brainModel": OOGWAY_OLLAMA_MODEL,
         "streams": get_default_stream_urls(),
         "streamOptions": [
             {
@@ -1900,7 +2125,7 @@ def brain_status() -> dict[str, Any]:
         "enabled": OOGWAY_BRAIN_ENABLED,
         "configured": is_brain_configured(),
         "name": OOGWAY_BRAIN_NAME,
-        "model": OOGWAY_BRAIN_MODEL,
+        "model": OOGWAY_OLLAMA_MODEL,
         "cameraKey": OOGWAY_BRAIN_CAMERA_KEY,
         "cameraTargets": [{"key": t["key"], "label": t["label"]} for t in targets],
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
