@@ -33,7 +33,7 @@ STREAM_LABEL_SECONDARY = os.getenv("STREAM_LABEL_SECONDARY", "Water Bowl Cam")
 STREAM_RESOLUTION_PRIMARY = os.getenv("STREAM_RESOLUTION_PRIMARY", "1080p")
 STREAM_RESOLUTION_SECONDARY = os.getenv("STREAM_RESOLUTION_SECONDARY", "720p")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
-TZ = os.getenv("TZ", "UTC")
+TZ = os.getenv("TZ", "America/New_York")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SUN_LAT = os.getenv("SUN_LAT", "40.7128")
 SUN_LNG = os.getenv("SUN_LNG", "-74.0060")
@@ -666,7 +666,7 @@ def append_person_profile_learning(person_name: str, note: str, ts: str | None =
             ]
         )
 
-    timestamp = (ts or datetime.now(timezone.utc).isoformat())[:19]
+    timestamp = local_obsidian_timestamp(ts)
     line = f"- {timestamp} {note[:180]}"
     if line not in current:
         if "## Interaction History" not in current:
@@ -700,7 +700,7 @@ def append_personality_learning(note: str, ts: str | None = None) -> None:
             ]
         )
 
-    timestamp = (ts or datetime.now(timezone.utc).isoformat())[:19]
+    timestamp = local_obsidian_timestamp(ts)
     line = f"- {timestamp} {note[:180]}"
     if line not in current:
         if "## Evolving Traits" not in current:
@@ -719,7 +719,7 @@ def care_level_rank(level: str) -> int:
 
 
 def write_obsidian_memory_note(item: dict[str, Any]) -> None:
-    ts = str(item.get("ts") or datetime.now(timezone.utc).isoformat())
+    ts = local_obsidian_iso(item.get("ts"))
     topic = str(item.get("topic") or "memory").strip() or "memory"
     trigger = str(item.get("trigger") or "periodic")
     note_text = str(item.get("note") or "")
@@ -791,7 +791,7 @@ def append_chat_log(item: dict[str, Any]) -> dict[str, Any]:
 
 def remember_memory_event(topic: str, note: str, trigger: str = "event", ts: str | None = None) -> None:
     payload = {
-        "ts": ts or datetime.now(timezone.utc).isoformat(),
+        "ts": ts or local_obsidian_iso(),
         "topic": topic,
         "note": note,
         "trigger": trigger,
@@ -2115,6 +2115,29 @@ def parse_iso_ts(ts: str | None) -> datetime | None:
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def local_obsidian_iso(ts: Any | None = None) -> str:
+    local_tz = get_local_tz()
+    if isinstance(ts, datetime):
+        dt = ts
+    elif ts:
+        parsed = parse_iso_ts(str(ts))
+        if parsed is None:
+            return str(ts)
+        dt = parsed
+    else:
+        dt = now_utc()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(local_tz).isoformat()
+
+
+def local_obsidian_timestamp(ts: Any | None = None) -> str:
+    local_dt = parse_iso_ts(local_obsidian_iso(ts))
+    if local_dt is None:
+        return str(ts or "")[:19]
+    return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def cleanup_admin_tokens() -> None:

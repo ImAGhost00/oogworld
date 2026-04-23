@@ -14,7 +14,7 @@ services:
       STREAM_RESOLUTION_PRIMARY: ${STREAM_RESOLUTION_PRIMARY:-1080p}
       STREAM_RESOLUTION_SECONDARY: ${STREAM_RESOLUTION_SECONDARY:-720p}
       NTFY_TOPIC: ${NTFY_TOPIC:-your-unique-ntfy-topic}
-      TZ: ${TZ:-UTC}
+      TZ: ${TZ:-America/New_York}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SUN_LAT: ${SUN_LAT:-40.7128}
       SUN_LNG: ${SUN_LNG:--74.0060}
@@ -62,7 +62,7 @@ services:
     environment:
       PUID: ${SYNCTHING_PUID:-1000}
       PGID: ${SYNCTHING_PGID:-1000}
-      TZ: ${TZ:-UTC}
+      TZ: ${TZ:-America/New_York}
     volumes:
       - syncthing_config:/config
       - ${HOST_OBSIDIAN_VAULT_PATH:-./obsidian-vault}:/sync/obsidian-vault
