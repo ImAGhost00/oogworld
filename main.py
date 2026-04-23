@@ -638,11 +638,43 @@ def append_to_daily_journal(date_str: str, note_title: str, topic: str, note_tex
     journal_path.write_text(current, encoding="utf-8")
 
 
+def infer_chat_memory_topic(note_text: str) -> tuple[str, str]:
+    raw_text = str(note_text or "").strip()
+    speaker = ""
+    message_body = raw_text
+    if ":" in raw_text:
+        maybe_speaker, maybe_body = raw_text.split(":", 1)
+        if maybe_speaker.strip() and len(maybe_speaker.strip()) <= 24:
+            speaker = canonical_username(maybe_speaker.strip())
+            message_body = maybe_body.strip()
+
+    lowered = f"{speaker} {message_body}".lower().strip()
+    if any(token in lowered for token in ["food", "feed", "feeding", "hungry", "kale", "greens", "lettuce", "eat", "eating"]):
+        return "Feeding", "[[Topic - Feeding]]"
+    if any(token in lowered for token in ["water", "drink", "drinking", "hydrate", "bowl"]):
+        return "Watering", "[[Topic - Watering]]"
+    if any(token in lowered for token in ["sleep", "sleepy", "bed", "bedtime", "dark", "nap", "hut"]):
+        return "Sleep", "[[Topic - Sleep]]"
+    if any(token in lowered for token in ["cat", "cats", "kitty", "kitten"]):
+        return "Cats", "[[Topic - Cats]]"
+    if any(token in lowered for token in ["fall", "fallen", "flip", "flipped", "hurt", "sick", "health", "vet", "breathing", "shell", "eyes"]):
+        return "Health", "[[Topic - Health]]"
+    if any(token in lowered for token in ["walk", "walking", "move", "moving", "roam", "roaming", "active", "behavior"]):
+        return "Behavior", "[[Topic - Behavior]]"
+    if "marcus" in lowered:
+        return "Marcus", "[[Profile Marcus]]"
+    if speaker and speaker.lower() != OOGWAY_BRAIN_NAME.lower():
+        return speaker, f"[[Profile {speaker}]]"
+    return "Human Chat", "[[Topic - Human-Chat]]"
+
+
 def append_to_daily_chat_log(ts: str, note_text: str) -> None:
     directory = ensure_obsidian_memory_dir()
     date_prefix = ts[:10]
     time_str = ts[11:19] if len(ts) >= 19 else ""
     title = f"Chat Log - {date_prefix}"
+    topic_name, topic_link = infer_chat_memory_topic(note_text)
+    section_title = f"## {topic_name}"
     path = directory / f"{slugify_note_title(title)}.md"
     if path.exists():
         current = path.read_text(encoding="utf-8")
@@ -654,20 +686,55 @@ def append_to_daily_chat_log(ts: str, note_text: str) -> None:
                 f"- date: {date_prefix}",
                 "- topic: chat",
                 "",
+                "## Topic Map",
+                "- [[Topic - Human-Chat]]",
+                "",
                 "## Messages",
                 "",
             ]
         )
 
-    line = f"- `{time_str}` {note_text[:240]}"
+    topic_bullet = f"- {topic_link}"
+    if topic_bullet not in current:
+        if "## Topic Map" not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Topic Map\n"
+        topic_map_pos = current.find("## Topic Map")
+        messages_pos = current.find("## Messages")
+        if topic_map_pos != -1 and messages_pos != -1 and topic_map_pos < messages_pos:
+            insert_at = messages_pos
+            prefix = current[:insert_at]
+            suffix = current[insert_at:]
+            if not prefix.endswith("\n"):
+                prefix += "\n"
+            prefix += topic_bullet + "\n"
+            current = prefix + suffix
+
+    line = f"- `{time_str}` {topic_link} {note_text[:240]}"
     if line not in current:
         if "## Messages" not in current:
             if not current.endswith("\n"):
                 current += "\n"
             current += "\n## Messages\n"
-        if not current.endswith("\n"):
-            current += "\n"
-        current += line + "\n"
+        if section_title not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += section_title + "\n\n"
+        section_pos = current.find(section_title)
+        next_section_pos = current.find("\n## ", section_pos + len(section_title))
+        if section_pos == -1:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += section_title + "\n\n" + line + "\n"
+        else:
+            insert_at = next_section_pos if next_section_pos != -1 else len(current)
+            prefix = current[:insert_at]
+            suffix = current[insert_at:]
+            if not prefix.endswith("\n"):
+                prefix += "\n"
+            prefix += line + "\n"
+            current = prefix + suffix
         path.write_text(current, encoding="utf-8")
 
 
