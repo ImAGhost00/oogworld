@@ -761,7 +761,14 @@ def recent_daily_activity_lines(limit: int = 6) -> list[str]:
 
 
 def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) -> tuple[str, str, str, list[str]]:
-    location = "inside the hut" if state.get("in_hut") else "out in the open"
+    if behavior.get("drinking") or behavior.get("near_water"):
+        location = "at the water bowl"
+    elif behavior.get("eating") or behavior.get("near_food"):
+        location = "at the food dish"
+    elif state.get("in_hut"):
+        location = "inside the hut"
+    else:
+        location = "out in the open"
     topic = "routine"
     activity = "resting"
     links: list[str] = []
@@ -2487,6 +2494,13 @@ async def run_brain_behavior_check() -> None:
 
     state = await evaluate_behavior_state(snapshots)
     behavior = await evaluate_eating_drinking(snapshots)
+
+    # Reconcile classifier conflicts: bowl/drinking observations win over hut location.
+    effective_in_hut = bool(state.get("in_hut", False))
+    if behavior.get("near_water") or behavior.get("near_food") or behavior.get("drinking") or behavior.get("eating"):
+        effective_in_hut = False
+    state_for_summary = dict(state)
+    state_for_summary["in_hut"] = effective_in_hut
     brain_log("brain.behavior.classified", state=state)
 
     if not state.get("scene_lit") or not state.get("tortoise_visible"):
@@ -2494,7 +2508,7 @@ async def run_brain_behavior_check() -> None:
 
     now_dt = now_utc()
     now_iso = now_dt.isoformat()
-    summary, summary_topic, location_label, links = summarize_observed_state(state, behavior)
+    summary, summary_topic, location_label, links = summarize_observed_state(state_for_summary, behavior)
     activity_label = summary.removeprefix(f"Oogway is {location_label} and ").rstrip(".") if summary.startswith(f"Oogway is {location_label} and ") else summary
     observation_due = (
         LAST_ACTIVITY_LOG_AT is None
@@ -2511,7 +2525,7 @@ async def run_brain_behavior_check() -> None:
         LAST_ACTIVITY_LOG_AT = now_dt
 
     # --- Hut entry / exit transition ---
-    in_hut_now = state.get("in_hut", False)
+    in_hut_now = effective_in_hut
     if LAST_HUT_STATE is not None and in_hut_now != LAST_HUT_STATE:
         if in_hut_now:
             event_note = "Oogway entered the hut."
