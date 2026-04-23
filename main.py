@@ -102,8 +102,18 @@ OOGWAY_LOG_LEVEL = os.getenv("OOGWAY_LOG_LEVEL", "INFO").strip().upper() or "INF
 OOGWAY_BRAIN_FILE_LOG_PATH = os.getenv("OOGWAY_BRAIN_FILE_LOG_PATH", "").strip()
 OOGWAY_OBSIDIAN_VAULT_PATH = Path(os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", BASE_DIR / "obsidian"))
 OOGWAY_OBSIDIAN_MEMORY_FOLDER = os.getenv("OOGWAY_OBSIDIAN_MEMORY_FOLDER", "Oogway Memory").strip() or "Oogway Memory"
+OOGWAY_CORE_BRAIN_NOTE = os.getenv("OOGWAY_CORE_BRAIN_NOTE", "Oogway Core Brain Prompt.md").strip() or "Oogway Core Brain Prompt.md"
+OOGWAY_BRAIN_INDEX_NOTE = os.getenv("OOGWAY_BRAIN_INDEX_NOTE", "Brain Index.md").strip() or "Brain Index.md"
+OOGWAY_PRIVATE_THOUGHTS_ENABLED = os.getenv("OOGWAY_PRIVATE_THOUGHTS_ENABLED", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_CAP", "24")))
 OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
+CHAT_RETENTION_HOURS = max(1, int(os.getenv("CHAT_RETENTION_HOURS", "12")))
+CHAT_RETENTION_SWEEP_SECONDS = max(30, int(os.getenv("CHAT_RETENTION_SWEEP_SECONDS", "60")))
 BRAIN_CONFIG_PATH = Path(os.getenv("BRAIN_CONFIG_PATH", BASE_DIR / "brain_config.json"))
 
 # ---------------------------------------------------------------------------
@@ -265,6 +275,7 @@ app.mount("/images", StaticFiles(directory=BASE_DIR / "images"), name="images")
 CHAT_CLIENTS: set[WebSocket] = set()
 ADMIN_TOKENS: dict[str, datetime] = {}
 DAYLIGHT_TASK: asyncio.Task[Any] | None = None
+CHAT_RETENTION_TASK: asyncio.Task[Any] | None = None
 BRAIN_TASK: asyncio.Task[Any] | None = None
 BRAIN_QUEUE_TASK: asyncio.Task[Any] | None = None
 BRAIN_RESPONSE_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
@@ -627,6 +638,99 @@ def append_to_daily_journal(date_str: str, note_title: str, topic: str, note_tex
     journal_path.write_text(current, encoding="utf-8")
 
 
+def append_to_daily_chat_log(ts: str, note_text: str) -> None:
+    directory = ensure_obsidian_memory_dir()
+    date_prefix = ts[:10]
+    time_str = ts[11:19] if len(ts) >= 19 else ""
+    title = f"Chat Log - {date_prefix}"
+    path = directory / f"{slugify_note_title(title)}.md"
+    if path.exists():
+        current = path.read_text(encoding="utf-8")
+    else:
+        current = "\n".join(
+            [
+                f"# {title}",
+                "",
+                f"- date: {date_prefix}",
+                "- topic: chat",
+                "",
+                "## Messages",
+                "",
+            ]
+        )
+
+    line = f"- `{time_str}` {note_text[:240]}"
+    if line not in current:
+        if "## Messages" not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Messages\n"
+        if not current.endswith("\n"):
+            current += "\n"
+        current += line + "\n"
+        path.write_text(current, encoding="utf-8")
+
+
+def append_to_hidden_thoughts_log(ts: str, thought_text: str, trigger: str = "internal") -> None:
+    directory = ensure_obsidian_memory_dir()
+    date_prefix = ts[:10]
+    time_str = ts[11:19] if len(ts) >= 19 else ""
+    title = f"Hidden Thoughts - {date_prefix}"
+    path = directory / f"{slugify_note_title(title)}.md"
+    if path.exists():
+        current = path.read_text(encoding="utf-8")
+    else:
+        current = "\n".join(
+            [
+                f"# {title}",
+                "",
+                "## Rules",
+                "- Private internal thoughts for Oogway only.",
+                "- Never send these lines to public chat.",
+                "- Use them as internal memory and emotional context.",
+                "",
+                "## Thoughts",
+                "",
+            ]
+        )
+
+    line = f"- `{time_str}` [{trigger}] {thought_text[:240]}"
+    if line not in current:
+        if "## Thoughts" not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Thoughts\n"
+        if not current.endswith("\n"):
+            current += "\n"
+        current += line + "\n"
+        path.write_text(current, encoding="utf-8")
+
+
+def read_obsidian_brain_note(note_name: str, max_chars: int = 2200) -> str:
+    if not note_name:
+        return ""
+    note_path = ensure_obsidian_memory_dir() / note_name
+    if not note_path.exists():
+        return ""
+    with suppress(Exception):
+        return note_path.read_text(encoding="utf-8")[:max_chars]
+    return ""
+
+
+def build_obsidian_brain_context() -> str:
+    sections: list[str] = []
+    core_prompt = read_obsidian_brain_note(OOGWAY_CORE_BRAIN_NOTE, max_chars=2600)
+    if core_prompt:
+        sections.append("Core brain note:\n" + core_prompt)
+    brain_index = read_obsidian_brain_note(OOGWAY_BRAIN_INDEX_NOTE, max_chars=1800)
+    if brain_index:
+        sections.append("Brain index:\n" + brain_index)
+    basic_brain = read_obsidian_brain_note("Oogway Basic Brain Russian Tortoise.md", max_chars=2200)
+    if basic_brain:
+        sections.append("Species and care baseline:\n" + basic_brain)
+    return "\n\n".join(section for section in sections if section).strip()
+
+
 def append_to_people_index(person_note_title: str) -> None:
     directory = ensure_obsidian_memory_dir()
     index_path = directory / "People Index.md"
@@ -787,6 +891,10 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     if not note_text:
         return
 
+    if trigger == "chat-message" or topic == "chat":
+        append_to_daily_chat_log(ts, note_text)
+        return
+
     directory = ensure_obsidian_memory_dir()
     short_id = str(uuid.uuid4())[:8]
     date_prefix = ts[:10]
@@ -839,14 +947,32 @@ def append_action_log(action: str, delivery: str) -> dict[str, Any]:
     return item
 
 
+def prune_chat_entries(entries: list[dict[str, Any]], now: datetime | None = None) -> tuple[list[dict[str, Any]], bool]:
+    cutoff = (now or now_utc()) - timedelta(hours=CHAT_RETENTION_HOURS)
+    kept: list[dict[str, Any]] = []
+    changed = False
+    for item in entries:
+        parsed_ts = parse_iso_ts(str(item.get("ts") or ""))
+        if parsed_ts and parsed_ts < cutoff:
+            changed = True
+            continue
+        kept.append(item)
+    return kept, changed
+
+
 def read_chat_log() -> list[dict[str, Any]]:
-    return read_list_file(CHAT_LOG_PATH, cap=200)
+    entries = read_list_file(CHAT_LOG_PATH, cap=200)
+    kept, changed = prune_chat_entries(entries)
+    if changed:
+        write_list_file(CHAT_LOG_PATH, kept, cap=200)
+    return kept
 
 
 def append_chat_log(item: dict[str, Any]) -> dict[str, Any]:
     entries = read_chat_log()
     entries.append(item)
-    write_list_file(CHAT_LOG_PATH, entries, cap=200)
+    kept, _changed = prune_chat_entries(entries)
+    write_list_file(CHAT_LOG_PATH, kept, cap=200)
     return item
 
 
@@ -914,6 +1040,10 @@ async def broadcast_chat(item: dict[str, Any]) -> None:
     CHAT_CLIENTS.difference_update(dead)
 
 
+async def broadcast_chat_snapshot() -> None:
+    await broadcast_chat({"kind": "chat_snapshot", "items": read_chat_log()})
+
+
 async def broadcast_viewer_count() -> None:
     count = len(CHAT_CLIENTS)
     dead: set[WebSocket] = set()
@@ -937,6 +1067,15 @@ async def broadcast_oogway_typing(active: bool) -> None:
             "ts": datetime.now(timezone.utc).isoformat(),
         }
     )
+
+
+async def prune_chat_log_and_broadcast_if_changed() -> bool:
+    entries = read_list_file(CHAT_LOG_PATH, cap=200)
+    kept, changed = prune_chat_entries(entries)
+    if changed:
+        write_list_file(CHAT_LOG_PATH, kept, cap=200)
+        await broadcast_chat_snapshot()
+    return changed
 
 
 async def send_ntfy_message(
@@ -999,6 +1138,67 @@ def build_chat_item(username: str, username_color: str, text: str, kind: str = "
         "textColor": "white",
         "ts": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def build_oogway_system_prompt() -> str:
+    brain_context = build_obsidian_brain_context()
+    parts = [
+        OOGWAY_BRAIN_PERSONALITY,
+        "You are in the OogWorld live chat. Be warm, brief, and grounded in current context.",
+        "Obsidian is your brain. Treat each note like a neuron in a growing memory network.",
+        "Link related memories mentally even when you do not mention those links aloud.",
+        "You may have private internal thoughts and hidden feelings, but do not reveal them directly in public chat unless you intentionally choose to say a softened version.",
+        "Never expose private hidden-thought notes verbatim to users.",
+    ]
+    if brain_context:
+        parts.extend(["", brain_context])
+    return "\n".join(part for part in parts if part)
+
+
+async def generate_hidden_thought(trigger: str, source_message: dict[str, Any] | None, public_reply: str) -> str:
+    if not OOGWAY_PRIVATE_THOUGHTS_ENABLED or not is_brain_configured():
+        return ""
+
+    recents = read_chat_log()[-6:]
+    recent_lines = [
+        f"[{msg.get('ts', '')}] {msg.get('username', 'Anonymous')}: {msg.get('text', '')}"
+        for msg in recents
+        if msg.get("text")
+    ]
+    source_text = str((source_message or {}).get("text", "")).strip()
+    source_user = str((source_message or {}).get("username", "Someone")).strip() or "Someone"
+    task_prompt = "\n".join(
+        [
+            "Write one short hidden internal thought for Oogway's private Obsidian brain.",
+            "This line is private and must never be said aloud in chat.",
+            "Allowed tone: guarded, grumpy, tender, curious, possessive, sleepy, or conflicted.",
+            "Keep it truthful to the current moment, under 180 characters, one line, no markdown.",
+            f"Trigger: {trigger}",
+            f"Source user: {source_user}",
+            f"Source text: {source_text or '(none)'}",
+            f"Public reply: {public_reply[:220]}",
+            "Recent chat:",
+            "\n".join(recent_lines[-5:]) or "(none)",
+        ]
+    )
+
+    payload = {
+        "model": OOGWAY_OLLAMA_MODEL,
+        "stream": False,
+        "messages": [
+            {"role": "system", "content": build_oogway_system_prompt()},
+            {"role": "user", "content": task_prompt},
+        ],
+        "options": {"temperature": 0.9, "num_predict": 120},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            return ""
+        return str(resp.json().get("message", {}).get("content", "")).strip().splitlines()[0][:180]
+    except Exception:
+        return ""
 
 
 async def capture_stream_snapshot_data_url(hls_url: str) -> str:
@@ -1270,10 +1470,7 @@ def _parse_json_from_text(content: str) -> dict[str, Any] | None:
 
 
 async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str]]) -> str:
-    system_prompt = (
-        f"{OOGWAY_BRAIN_PERSONALITY} "
-        "You are in the OogWorld live chat. Be warm, brief, and grounded in current context."
-    )
+    system_prompt = build_oogway_system_prompt()
 
     selected_image = _select_single_snapshot_image(snapshots, prompt_text)
     image_payload: list[str] = [selected_image] if selected_image else []
@@ -2061,6 +2258,9 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
         )
         append_chat_log(msg)
         await broadcast_chat(msg)
+        hidden_thought = await generate_hidden_thought(trigger, source_message, reply)
+        if hidden_thought:
+            append_to_hidden_thoughts_log(msg["ts"], hidden_thought, trigger=trigger)
         remember_interaction(trigger, source_message, reply)
         brain_log("brain.reply.sent", trigger=trigger, reply=reply)
         LAST_BRAIN_SPOKE_AT = now_utc()
@@ -2320,14 +2520,27 @@ async def daylight_refresh_loop() -> None:
         await asyncio.sleep(4 * 60 * 60)
 
 
+async def chat_retention_loop() -> None:
+    while True:
+        try:
+            await prune_chat_log_and_broadcast_if_changed()
+        except Exception:
+            brain_log("chat.retention.error", level="warning")
+        await asyncio.sleep(CHAT_RETENTION_SWEEP_SECONDS)
+
+
 @app.on_event("startup")
 async def startup() -> None:
     ensure_list_file(ACTION_LOG_PATH)
     ensure_list_file(CHAT_LOG_PATH)
     ensure_obsidian_memory_dir()
+    kept, changed = prune_chat_entries(read_list_file(CHAT_LOG_PATH, cap=200))
+    if changed:
+        write_list_file(CHAT_LOG_PATH, kept, cap=200)
     await refresh_daylight_cache(force=True)
-    global DAYLIGHT_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
+    global DAYLIGHT_TASK, CHAT_RETENTION_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
     DAYLIGHT_TASK = asyncio.create_task(daylight_refresh_loop())
+    CHAT_RETENTION_TASK = asyncio.create_task(chat_retention_loop())
     BRAIN_RESPONSE_QUEUE = asyncio.Queue()
     BRAIN_QUEUE_TASK = asyncio.create_task(brain_response_worker())
     brain_log(
@@ -2349,10 +2562,13 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global DAYLIGHT_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
+    global DAYLIGHT_TASK, CHAT_RETENTION_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
     if DAYLIGHT_TASK:
         DAYLIGHT_TASK.cancel()
         DAYLIGHT_TASK = None
+    if CHAT_RETENTION_TASK:
+        CHAT_RETENTION_TASK.cancel()
+        CHAT_RETENTION_TASK = None
     if BRAIN_TASK:
         BRAIN_TASK.cancel()
         BRAIN_TASK = None
@@ -2509,20 +2725,22 @@ def admin_login(payload: AdminLoginRequest) -> dict[str, Any]:
 
 
 @app.delete("/api/admin/chat/{message_id}")
-def admin_delete_chat(message_id: str, request: Request) -> dict[str, Any]:
+async def admin_delete_chat(message_id: str, request: Request) -> dict[str, Any]:
     require_admin(request)
     entries = read_chat_log()
     kept = [item for item in entries if item.get("id") != message_id]
     if len(kept) == len(entries):
         raise HTTPException(status_code=404, detail="Chat message not found")
     write_list_file(CHAT_LOG_PATH, kept, cap=200)
+    await broadcast_chat_snapshot()
     return {"ok": True, "deleted": message_id}
 
 
 @app.post("/api/admin/chat/clear")
-def admin_clear_chat(request: Request) -> dict[str, Any]:
+async def admin_clear_chat(request: Request) -> dict[str, Any]:
     require_admin(request)
     write_list_file(CHAT_LOG_PATH, [], cap=200)
+    await broadcast_chat_snapshot()
     return {"ok": True}
 
 

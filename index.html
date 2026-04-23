@@ -1105,7 +1105,7 @@
         row.className = "mb-1 leading-snug";
 
         var dt = msg.ts ? new Date(msg.ts) : new Date();
-        var time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  var time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
         var msgTextColor = msg.textColor === "black" ? "#111111" : "#ffffff";
         var msgTextBg = msg.textColor === "black" ? "background: #f5f5f5; padding: 0 4px; border-radius: 4px;" : "";
 
@@ -1127,6 +1127,16 @@
         if (msg.kind === "report") {
           loadReports();
         }
+      }
+
+      function replaceChatMessages(items) {
+        el.chatMessages.innerHTML = "";
+        state.seenMessageIds = {};
+        var staleTyping = document.getElementById("oogway-typing-indicator");
+        if (staleTyping) staleTyping.remove();
+        (items || []).forEach(function (msg) {
+          appendChatMessage(msg);
+        });
       }
 
       async function loadHealth() {
@@ -1390,6 +1400,10 @@
             var msg = JSON.parse(evt.data);
             if (msg.kind === "viewer_count") {
               if (el.viewerCountChip) el.viewerCountChip.textContent = "\uD83D\uDC41 " + msg.count;
+              return;
+            }
+            if (msg.kind === "chat_snapshot") {
+              replaceChatMessages(Array.isArray(msg.items) ? msg.items : []);
               return;
             }
             appendChatMessage(msg);

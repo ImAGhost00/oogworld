@@ -19,8 +19,9 @@ services:
       SUN_LAT: ${SUN_LAT:-40.7128}
       SUN_LNG: ${SUN_LNG:--74.0060}
       BEDTIME_SOON_MINUTES: ${BEDTIME_SOON_MINUTES:-90}
-      ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/activity_log.json}
-      CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/chat_log.json}
+      ACTIVITY_LOG_PATH: ${ACTIVITY_LOG_PATH:-/app/data/activity_log.json}
+      CHAT_LOG_PATH: ${CHAT_LOG_PATH:-/app/data/chat_log.json}
+      CHAT_RETENTION_HOURS: ${CHAT_RETENTION_HOURS:-12}
       OOGWAY_BRAIN_ENABLED: ${OOGWAY_BRAIN_ENABLED:-false}
       OOGWAY_BRAIN_NAME: ${OOGWAY_BRAIN_NAME:-Oogway}
       OOGWAY_OLLAMA_BASE: ${OOGWAY_OLLAMA_BASE:-http://ollama:11434}
@@ -34,6 +35,7 @@ services:
       OOGWAY_OBSIDIAN_MEMORY_FOLDER: ${OOGWAY_OBSIDIAN_MEMORY_FOLDER:-Oogway Memory}
     volumes:
       - ${HOST_OBSIDIAN_VAULT_PATH:-./obsidian-vault}:/app/obsidian
+      - ${HOST_APP_DATA_PATH:-./data}:/app/data
     ports:
       - "4120:4120"
     restart: unless-stopped
