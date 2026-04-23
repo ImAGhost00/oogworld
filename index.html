@@ -750,18 +750,6 @@
       <label class="mb-1 block text-xs text-slate-400">Badge Color</label>
       <div id="chat-color-swatches" class="mb-3 flex flex-wrap gap-2"></div>
 
-      <label class="mb-1 block text-xs text-slate-400">Chat Text Color</label>
-      <div class="mb-4 flex gap-3 text-sm">
-        <label class="inline-flex items-center gap-2">
-          <input type="radio" name="chatTextColor" value="white" checked class="accent-[#4caf50]" />
-          <span>White</span>
-        </label>
-        <label class="inline-flex items-center gap-2">
-          <input type="radio" name="chatTextColor" value="black" class="accent-[#4caf50]" />
-          <span>Black</span>
-        </label>
-      </div>
-
       <button id="chat-settings-save" class="w-full rounded-lg bg-[#4caf50] py-2 text-sm font-bold text-[#0a1f0c]">Save</button>
     </div>
   </div>
@@ -908,7 +896,6 @@
       var state = {
         username: sessionStorage.getItem("oogworld_username") || "",
         badgeColor: sessionStorage.getItem("oogworld_badge_color") || "#4caf50",
-        chatTextColor: sessionStorage.getItem("oogworld_chat_text_color") || "white",
         adminToken: sessionStorage.getItem("oogworld_admin_token") || "",
         streams: {},
         streamOptions: [],
@@ -1108,9 +1095,7 @@
         row.className = "mb-1 leading-snug";
 
         var dt = msg.ts ? new Date(msg.ts) : new Date();
-  var time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-        var msgTextColor = msg.textColor === "black" ? "#111111" : "#ffffff";
-        var msgTextBg = msg.textColor === "black" ? "background: #f5f5f5; padding: 0 4px; border-radius: 4px;" : "";
+          var time = dt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
         var kindBadge = msg.kind === "action" ? "<span class=\"mr-1 rounded bg-emerald-600/30 px-1.5 py-0.5 text-[10px] text-emerald-200\">ACTION</span>" : "";
         var canDelete = !!state.adminToken && !!msg.id;
@@ -1121,7 +1106,7 @@
           "<span class=\"text-[11px] text-slate-500\">[" + escHtml(time) + "]</span> " +
           kindBadge +
           "<span class=\"font-semibold\" style=\"color:" + escHtml(msg.usernameColor || "#a3e635") + "\">" + escHtml(msg.username || "Anonymous") + "</span>: " +
-          "<span style=\"color:" + msgTextColor + "; " + msgTextBg + "\">" + escHtml(msg.text || "") + "</span>" +
+          "<span style=\"color:#ffffff;\">" + escHtml(msg.text || "") + "</span>" +
           deleteBtn;
 
         el.chatMessages.appendChild(row);
@@ -1394,7 +1379,6 @@
       function connectChat() {
         var proto = location.protocol === "https:" ? "wss" : "ws";
         var qs = "?username=" + encodeURIComponent(state.username) +
-          "&textColor=" + encodeURIComponent(state.chatTextColor) +
           "&usernameColor=" + encodeURIComponent(state.badgeColor);
         state.ws = new WebSocket(proto + "://" + location.host + "/ws/chat" + qs);
 
@@ -1430,7 +1414,6 @@
         if (!text || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
         state.ws.send(JSON.stringify({
           text: text,
-          textColor: state.chatTextColor,
           usernameColor: state.badgeColor
         }));
         el.chatInput.value = "";
@@ -1745,10 +1728,6 @@
 
       function openChatSettings() {
         el.chatNameInput.value = state.username;
-        var radios = document.querySelectorAll('input[name="chatTextColor"]');
-        radios.forEach(function (r) {
-          r.checked = r.value === state.chatTextColor;
-        });
         buildColorSwatches(el.chatColorSwatches, state.badgeColor);
         el.chatSettingsModal.classList.remove("hidden");
       }
@@ -1759,16 +1738,10 @@
 
       function saveChatSettings() {
         state.username = (el.chatNameInput.value || "").trim().replace(/[<>]/g, "").slice(0, 24) || "Anonymous";
-        var selectedColor = "white";
-        var radios = document.querySelectorAll('input[name="chatTextColor"]');
-        radios.forEach(function (r) {
-          if (r.checked) selectedColor = r.value;
-        });
-        state.chatTextColor = selectedColor === "black" ? "black" : "white";
 
         sessionStorage.setItem("oogworld_username", state.username);
         sessionStorage.setItem("oogworld_badge_color", state.badgeColor);
-        sessionStorage.setItem("oogworld_chat_text_color", state.chatTextColor);
+        sessionStorage.removeItem("oogworld_chat_text_color");
 
         applyBadge();
         closeChatSettings();

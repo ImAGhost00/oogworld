@@ -24,6 +24,24 @@ from pydantic import BaseModel
 
 APP_VERSION = "0.3.0"
 BASE_DIR = Path(__file__).parent
+
+
+def resolve_obsidian_vault_path() -> Path:
+    preferred = BASE_DIR / "obsidian-vault"
+    legacy = BASE_DIR / "obsidian"
+    configured = os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", "").strip()
+    if configured:
+        configured_path = Path(configured)
+        if configured_path.exists():
+            return configured_path
+        if preferred.exists():
+            return preferred
+        return configured_path
+    if preferred.exists():
+        return preferred
+    return legacy
+
+
 ACTION_LOG_PATH = Path(os.getenv("ACTIVITY_LOG_PATH", BASE_DIR / "activity_log.json"))
 CHAT_LOG_PATH = Path(os.getenv("CHAT_LOG_PATH", BASE_DIR / "chat_log.json"))
 STREAM_URL_PRIMARY = os.getenv("STREAM_URL_PRIMARY", os.getenv("STREAM_URL", ""))
@@ -38,7 +56,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SUN_LAT = os.getenv("SUN_LAT", "40.7128")
 SUN_LNG = os.getenv("SUN_LNG", "-74.0060")
 BEDTIME_SOON_MINUTES = int(os.getenv("BEDTIME_SOON_MINUTES", "90"))
-OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "false").strip().lower() in {
+OOGWAY_BRAIN_ENABLED = os.getenv("OOGWAY_BRAIN_ENABLED", "true").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -104,7 +122,7 @@ OOGWAY_TEXTS_ANGER_AFTER_SECONDS = max(
 )
 OOGWAY_LOG_LEVEL = os.getenv("OOGWAY_LOG_LEVEL", "INFO").strip().upper() or "INFO"
 OOGWAY_BRAIN_FILE_LOG_PATH = os.getenv("OOGWAY_BRAIN_FILE_LOG_PATH", "").strip()
-OOGWAY_OBSIDIAN_VAULT_PATH = Path(os.getenv("OOGWAY_OBSIDIAN_VAULT_PATH", BASE_DIR / "obsidian"))
+OOGWAY_OBSIDIAN_VAULT_PATH = resolve_obsidian_vault_path()
 OOGWAY_OBSIDIAN_MEMORY_FOLDER = os.getenv("OOGWAY_OBSIDIAN_MEMORY_FOLDER", "Oogway Memory").strip() or "Oogway Memory"
 OOGWAY_CORE_BRAIN_NOTE = os.getenv("OOGWAY_CORE_BRAIN_NOTE", "Oogway Core Brain Prompt.md").strip() or "Oogway Core Brain Prompt.md"
 OOGWAY_BRAIN_INDEX_NOTE = os.getenv("OOGWAY_BRAIN_INDEX_NOTE", "Brain Index.md").strip() or "Brain Index.md"
@@ -1214,9 +1232,28 @@ def read_recent_obsidian_memories(limit: int = 18) -> list[dict[str, str]]:
                 note = line
                 break
 
+        if not note:
+            chat_lines = [
+                ln.strip()
+                for ln in content.splitlines()
+                if ln.strip().startswith("- `") and "[[" in ln and "]]" in ln
+            ]
+            if chat_lines:
+                latest = chat_lines[-1]
+                cleaned = re.sub(r"^- `[^`]*`\s*", "", latest)
+                cleaned = re.sub(r"\[\[[^\]]+\]\]\s*", "", cleaned, count=1).strip()
+                if cleaned:
+                    note = cleaned
+                    if topic == "memory":
+                        topic = "chat"
+                    if not ts and note_path.stem.startswith("Chat Log - "):
+                        date_part = note_path.stem.replace("Chat Log - ", "", 1).strip()
+                        if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
+                            ts = f"{date_part}T00:00:00"
+
         if note:
             entries.append({"ts": ts, "topic": topic, "note": note})
-    return entries
+    return entries[:limit]
 
 
 def canonical_username(raw: str | None) -> str:
@@ -2782,6 +2819,9 @@ async def startup() -> None:
         "brain.startup",
         enabled=OOGWAY_BRAIN_ENABLED,
         configured=is_brain_configured(),
+        obsidianVault=str(OOGWAY_OBSIDIAN_VAULT_PATH),
+        obsidianMemoryFolder=OOGWAY_OBSIDIAN_MEMORY_FOLDER,
+        obsidianMemoryDir=str(ensure_obsidian_memory_dir()),
         model=OOGWAY_OLLAMA_MODEL,
         visionModel=OOGWAY_OLLAMA_VISION_MODEL,
         ollamaBase=OOGWAY_OLLAMA_BASE,
@@ -3080,7 +3120,7 @@ async def chat_ws(
     usernameColor: str = "#a3e635",
 ) -> None:
     safe_name = canonical_username(username)
-    connection_color = "black" if textColor == "black" else "white"
+    connection_color = "white"
     connection_name_color = usernameColor[:12] if usernameColor.startswith("#") else "#a3e635"
     await ws.accept()
     CHAT_CLIENTS.add(ws)
@@ -3102,7 +3142,7 @@ async def chat_ws(
                 payload = json.loads(raw)
                 if isinstance(payload, dict):
                     text = str(payload.get("text", "")).strip()[:240]
-                    msg_color = "black" if str(payload.get("textColor", connection_color)).lower() == "black" else "white"
+                    msg_color = "white"
                     raw_name_color = str(payload.get("usernameColor", connection_name_color))
                     if raw_name_color.startswith("#"):
                         msg_name_color = raw_name_color[:12]
