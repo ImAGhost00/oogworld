@@ -1827,6 +1827,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
                 )
                 append_chat_log(msg)
                 await broadcast_chat(msg)
+                return
             elif trigger == "manual":
                 pass  # manual trigger bypasses sleep gate — fall through to normal reply
             else:
