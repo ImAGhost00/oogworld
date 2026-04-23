@@ -979,7 +979,7 @@ async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
     return snapshots
 
 
-def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> str:
+def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sleepy_mode: bool = False) -> str:
     recents = read_chat_log()[-OOGWAY_BRAIN_CONTEXT_CHAT_CAP:]
     memory = read_recent_obsidian_memories(limit=14)
     recent_lines = [
@@ -1004,6 +1004,12 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None) -> 
             "You were mentioned in chat. Reply directly to the user in 1-3 short sentences, "
             "friendly, alive, and specific."
         )
+        if sleepy_mode:
+            trigger_text = (
+                "You were mentioned during bedtime/night. Reply in 1-2 short sentences, "
+                "sleepy and mildly annoyed, like a tired tortoise. "
+                "Say you are trying to sleep, but still answer briefly if asked about food/water."
+            )
         mention_line = (
             f"Mention came from {source_message.get('username', 'Anonymous')}: "
             f"{source_message.get('text', '')}"
@@ -1815,19 +1821,10 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
         with suppress(Exception):
             await refresh_daylight_cache(force=False)
 
-        if not brain_awake_now():
+        sleepy_mode = not brain_awake_now()
+        if sleepy_mode:
             if trigger == "mention":
-                sleepy = random.choice(_SLEEP_REACTIONS)
-                brain_log("brain.reply.sleeping", trigger=trigger, reply=sleepy)
-                msg = build_chat_item(
-                    username=OOGWAY_BRAIN_NAME,
-                    username_color=BRAIN_USERNAME_COLOR,
-                    text=sleepy,
-                    kind="chat",
-                )
-                append_chat_log(msg)
-                await broadcast_chat(msg)
-                return
+                brain_log("brain.reply.sleeping.generate", trigger=trigger)
             elif trigger == "manual":
                 pass  # manual trigger bypasses sleep gate — fall through to normal reply
             else:
@@ -1842,7 +1839,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 
         movement_recent = await refresh_brain_motion_state()
 
-        prompt_text = build_oogway_prompt(trigger, source_message)
+        prompt_text = build_oogway_prompt(trigger, source_message, sleepy_mode=sleepy_mode)
         snapshots = await capture_brain_snapshots_data_urls()
         brain_log("brain.reply.request", trigger=trigger, snapshots=len(snapshots), promptChars=len(prompt_text))
         await broadcast_oogway_typing(True)
