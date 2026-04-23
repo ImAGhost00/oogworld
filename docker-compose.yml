@@ -56,50 +56,6 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  ollama-model-init:
-    image: ollama/ollama:latest
-    container_name: oogworld-ollama-model-init
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-      OOGWAY_OLLAMA_MODEL: ${OOGWAY_OLLAMA_MODEL:-llama3.1:8b}
-      OOGWAY_OLLAMA_VISION_MODEL: ${OOGWAY_OLLAMA_VISION_MODEL:-llama3.2-vision:latest}
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        set -e
-        pull_with_retry() {
-          model_name="$1"
-          label="$2"
-          if [ -z "$model_name" ]; then
-            echo "${label} model not set, skipping"
-            return 0
-          fi
-
-          for i in 1 2 3 4 5 6 7 8; do
-            if ollama pull "$model_name"; then
-              echo "pulled ${label} model: $model_name"
-              return 0
-            fi
-            echo "${label} model pull failed (attempt $i), retrying..."
-            sleep 5
-          done
-
-          echo "warning: unable to pull ${label} model '$model_name' after retries; continuing"
-          return 0
-        }
-
-        chat_model="${OOGWAY_OLLAMA_MODEL:-llama3.1:8b}"
-        vision_model="${OOGWAY_OLLAMA_VISION_MODEL:-llama3.2-vision:latest}"
-        pull_with_retry "$chat_model" "chat"
-        pull_with_retry "$vision_model" "vision"
-    volumes:
-      - ollama_data:/root/.ollama
-    restart: "no"
-
   syncthing:
     image: lscr.io/linuxserver/syncthing:latest
     container_name: oogworld-syncthing
