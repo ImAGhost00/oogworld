@@ -72,7 +72,7 @@ OOGWAY_BRAIN_PERSONALITY = os.getenv(
     "OOGWAY_BRAIN_PERSONALITY",
     "You are Oogway, a warm and observant tortoise who talks like a living terrarium companion.",
 )
-OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(os.getenv("OOGWAY_BRAIN_INTERVAL_SECONDS", "300")))
+OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(os.getenv("OOGWAY_BRAIN_INTERVAL_SECONDS", "120")))
 OOGWAY_BRAIN_MENTION_TRIGGER = os.getenv("OOGWAY_BRAIN_MENTION_TRIGGER", "@oogway")
 OOGWAY_BRAIN_CAMERA_KEY = os.getenv("OOGWAY_BRAIN_CAMERA_KEY", "both")
 OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS = max(
@@ -109,7 +109,7 @@ OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS = max(
 )
 OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS = max(
     300,
-    int(os.getenv("OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS", "1200")),
+    int(os.getenv("OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS", "300")),
 )
 OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS = max(
     300,
@@ -136,6 +136,9 @@ OOGWAY_BRAIN_CONTEXT_CHAT_CAP = max(8, int(os.getenv("OOGWAY_BRAIN_CONTEXT_CHAT_
 OOGWAY_TEXTS_TOPIC = os.getenv("OOGWAY_TEXTS_TOPIC", "oogworldtexts").strip()
 CHAT_RETENTION_HOURS = max(1, int(os.getenv("CHAT_RETENTION_HOURS", "12")))
 CHAT_RETENTION_SWEEP_SECONDS = max(30, int(os.getenv("CHAT_RETENTION_SWEEP_SECONDS", "60")))
+OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS = max(20, int(os.getenv("OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS", "45")))
+OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS = max(12, int(os.getenv("OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS", "30")))
+OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS = max(4, int(os.getenv("OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS", "6")))
 BRAIN_CONFIG_PATH = Path(os.getenv("BRAIN_CONFIG_PATH", BASE_DIR / "brain_config.json"))
 
 # ---------------------------------------------------------------------------
@@ -300,7 +303,8 @@ DAYLIGHT_TASK: asyncio.Task[Any] | None = None
 CHAT_RETENTION_TASK: asyncio.Task[Any] | None = None
 BRAIN_TASK: asyncio.Task[Any] | None = None
 BRAIN_QUEUE_TASK: asyncio.Task[Any] | None = None
-BRAIN_RESPONSE_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
+BRAIN_RESPONSE_QUEUE: asyncio.PriorityQueue[tuple[int, int, dict[str, Any]]] | None = None
+BRAIN_QUEUE_SEQUENCE = 0
 BRAIN_LOCK = asyncio.Lock()
 LAST_BRAIN_SPOKE_AT: datetime | None = None
 LAST_BRAIN_MOVEMENT_AT: datetime | None = None
@@ -1209,6 +1213,28 @@ def remember_memory_event(topic: str, note: str, trigger: str = "event", ts: str
 
 
 def read_recent_obsidian_memories(limit: int = 18) -> list[dict[str, str]]:
+    def _extract_last_profile_interaction(content: str) -> tuple[str, str]:
+        in_section = False
+        last_line = ""
+        for raw in content.splitlines():
+            line = raw.strip()
+            if line == "## Interaction History":
+                in_section = True
+                continue
+            if in_section and line.startswith("## "):
+                break
+            if in_section and line.startswith("- "):
+                last_line = line
+        if not last_line:
+            return "", ""
+        cleaned = re.sub(r"^-\s*", "", last_line)
+        ts_match = re.match(r"^(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+", cleaned)
+        if ts_match:
+            ts_value = ts_match.group(1).replace(" ", "T")
+            cleaned = cleaned[ts_match.end() :].strip()
+            return ts_value, cleaned
+        return "", cleaned
+
     entries: list[dict[str, str]] = []
     for note_path in list_obsidian_memory_notes()[:max(1, limit)]:
         try:
@@ -1251,9 +1277,23 @@ def read_recent_obsidian_memories(limit: int = 18) -> list[dict[str, str]]:
                         if re.match(r"^\d{4}-\d{2}-\d{2}$", date_part):
                             ts = f"{date_part}T00:00:00"
 
+        if not note and note_path.stem.startswith("Profile "):
+            profile_name = note_path.stem.replace("Profile ", "", 1).strip()
+            profile_ts, profile_note = _extract_last_profile_interaction(content)
+            if profile_note:
+                ts = profile_ts or ts
+                topic = f"person-{slugify_note_title(profile_name).lower().replace(' ', '-')[:40]}"
+                note = f"{profile_name}: {profile_note}"[:260]
+
+        if not note and note_path.stem == "Oogway Personality":
+            trait_lines = [ln.strip() for ln in content.splitlines() if ln.strip().startswith("- ")]
+            if trait_lines:
+                note = re.sub(r"^-\s*", "", trait_lines[-1])[:260]
+                topic = "personality"
+
         if note:
             entries.append({"ts": ts, "topic": topic, "note": note})
-    return entries[:limit]
+    return entries[: max(1, limit)]
 
 
 def canonical_username(raw: str | None) -> str:
@@ -1429,7 +1469,7 @@ async def generate_hidden_thought(trigger: str, source_message: dict[str, Any] |
         "options": {"temperature": 0.9, "num_predict": 120},
     }
     try:
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             return ""
@@ -1461,7 +1501,7 @@ async def capture_stream_snapshot_data_url(hls_url: str) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS)
     except Exception:
         return ""
 
@@ -1495,7 +1535,7 @@ async def capture_stream_motion_probe(hls_url: str) -> bytes:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=12)
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS)
     except Exception:
         return b""
     return stdout or b""
@@ -1615,7 +1655,7 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
         recalls=len(obsidian_recalls),
     )
 
-    if trigger == "mention" and source_message:
+    if trigger in {"mention", "chat"} and source_message:
         trigger_text = (
             "You were mentioned in chat. Reply directly to the user in 1-3 short sentences, "
             "friendly, alive, and specific."
@@ -1747,7 +1787,7 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
             ],
             "options": {"temperature": 0.7, "num_predict": 280},
         }
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             body_excerpt = ""
@@ -1812,7 +1852,7 @@ async def vision_json_classify(
             ],
             "options": {"temperature": 0.1, "num_predict": 120},
         }
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             body_excerpt = ""
@@ -1888,7 +1928,7 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]
             ],
             "options": {"temperature": 0.1, "num_predict": 60},
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             body_excerpt = ""
@@ -1975,7 +2015,7 @@ async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str,
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             body_excerpt = ""
@@ -2063,7 +2103,7 @@ async def evaluate_behavior_state(snapshots: list[dict[str, str]]) -> dict[str, 
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
             resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
         if resp.status_code >= 400:
             brain_log("vision.state.http_error", level="error", status=resp.status_code)
@@ -2388,9 +2428,12 @@ async def run_brain_care_check() -> None:
 def remember_interaction(trigger: str, source_message: dict[str, Any] | None, reply_text: str) -> None:
     source_text = str((source_message or {}).get("text", ""))
     person = str((source_message or {}).get("username", "")).strip()
+    observed_context = ""
+    if LAST_OBSERVED_LOCATION and LAST_OBSERVED_LOCATION != "unknown":
+        observed_context = f" | observed: {LAST_OBSERVED_LOCATION} ({LAST_OBSERVED_ACTIVITY})"
     if source_text:
-        topic = infer_memory_topic_slug(source_text, fallback="human-chat" if trigger == "mention" else "routine")
-        note = f"{person or 'Someone'}: {source_text[:140]} | Oogway: {reply_text[:140]}"
+        topic = infer_memory_topic_slug(source_text, fallback="human-chat" if trigger in {"mention", "chat"} else "routine")
+        note = f"{person or 'Someone'}: {source_text[:140]} | Oogway: {reply_text[:140]}{observed_context}"[:220]
     else:
         topic = infer_memory_topic_slug(f"{LAST_OBSERVED_SUMMARY} {reply_text}", fallback=LAST_OBSERVED_TOPIC or "routine")
         if LAST_OBSERVED_SUMMARY:
@@ -2425,6 +2468,8 @@ def should_trigger_oogway_mention(text: str) -> bool:
 
 
 async def enqueue_brain_response(trigger: str, source_message: dict[str, Any] | None = None) -> bool:
+    global BRAIN_QUEUE_SEQUENCE
+
     queue = BRAIN_RESPONSE_QUEUE
     if queue is None:
         brain_log("brain.queue.missing", trigger=trigger, level="warning")
@@ -2434,8 +2479,10 @@ async def enqueue_brain_response(trigger: str, source_message: dict[str, Any] | 
         brain_log("brain.queue.skip.periodic_busy", queued=queue.qsize(), level="debug")
         return False
 
-    await queue.put({"trigger": trigger, "source_message": source_message})
-    brain_log("brain.queue.enqueued", trigger=trigger, queued=queue.qsize())
+    priority = 0 if trigger in {"mention", "manual"} else (1 if trigger == "chat" else 5)
+    BRAIN_QUEUE_SEQUENCE += 1
+    await queue.put((priority, BRAIN_QUEUE_SEQUENCE, {"trigger": trigger, "source_message": source_message}))
+    brain_log("brain.queue.enqueued", trigger=trigger, priority=priority, queued=queue.qsize())
     return True
 
 
@@ -2444,7 +2491,7 @@ async def brain_response_worker() -> None:
         if BRAIN_RESPONSE_QUEUE is None:
             await asyncio.sleep(0.2)
             continue
-        item = await BRAIN_RESPONSE_QUEUE.get()
+        _priority, _seq, item = await BRAIN_RESPONSE_QUEUE.get()
         try:
             await run_oogway_brain(
                 trigger=str(item.get("trigger", "periodic")),
@@ -2813,7 +2860,7 @@ async def startup() -> None:
     global DAYLIGHT_TASK, CHAT_RETENTION_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
     DAYLIGHT_TASK = asyncio.create_task(daylight_refresh_loop())
     CHAT_RETENTION_TASK = asyncio.create_task(chat_retention_loop())
-    BRAIN_RESPONSE_QUEUE = asyncio.Queue()
+    BRAIN_RESPONSE_QUEUE = asyncio.PriorityQueue()
     BRAIN_QUEUE_TASK = asyncio.create_task(brain_response_worker())
     brain_log(
         "brain.startup",
@@ -3175,13 +3222,16 @@ async def chat_ws(
                 )
 
             is_self = safe_name.lower() == OOGWAY_BRAIN_NAME.lower()
-            if OOGWAY_BRAIN_ENABLED and is_brain_configured() and (not is_self) and should_trigger_oogway_mention(text):
-                brain_log(
-                    "brain.mention.detected",
-                    user=safe_name,
-                    text=text[:180],
-                )
-                await enqueue_brain_response(trigger="mention", source_message=msg)
+            if OOGWAY_BRAIN_ENABLED and is_brain_configured() and (not is_self):
+                if should_trigger_oogway_mention(text):
+                    brain_log(
+                        "brain.mention.detected",
+                        user=safe_name,
+                        text=text[:180],
+                    )
+                    await enqueue_brain_response(trigger="mention", source_message=msg)
+                else:
+                    await enqueue_brain_response(trigger="chat", source_message=msg)
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)
         await broadcast_viewer_count()
