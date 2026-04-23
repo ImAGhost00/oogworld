@@ -1826,6 +1826,7 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             "Obsidian recalls:",
             "\n".join(obsidian_recalls) or "(none)",
             "",
+            "Use latest visual-location memory first when describing where Oogway is.",
             "Recent Oogway replies to avoid repeating verbatim:",
             "\n".join(f"- {line[:140]}" for line in recent_oogway_lines[-3:]) or "(none)",
             "",
@@ -2228,69 +2229,115 @@ async def evaluate_behavior_state(snapshots: list[dict[str, str]]) -> dict[str, 
         "scene_lit": False,
         "tortoise_visible": False,
         "in_hut": False,
+        "near_hut": False,
+        "near_water": False,
+        "near_food": False,
         "fallen_over": False,
     }
     if not snapshots or not OOGWAY_OLLAMA_VISION_MODEL:
         return defaults
 
-    images = _select_snapshot_images(snapshots, "tortoise in hut fallen over water bowl", max_images=2)
-    if not images:
+    selected = [
+        snapshot
+        for snapshot in snapshots[:3]
+        if _extract_data_url_base64(str(snapshot.get("dataUrl", "")))
+    ]
+    if not selected:
         return defaults
 
-    payload = {
-        "model": OOGWAY_OLLAMA_VISION_MODEL,
-        "stream": False,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a precise terrarium monitor. "
-                    "Analyze tortoise position and posture in the camera images. "
-                    "Be conservative — only report true when clearly visible."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Return ONLY strict JSON with these keys: "
-                    '{"scene_lit": boolean, "tortoise_visible": boolean, "in_hut": boolean, "fallen_over": boolean}. '
-                    "scene_lit: true if the enclosure is well lit and clearly visible. "
-                    "tortoise_visible: true if you can clearly see the tortoise. "
-                    "in_hut: true if the tortoise is inside or entering the wooden/hide hut structure. "
-                    "fallen_over: true if the tortoise appears to be on its side or upside down (flipped). "
-                    "If uncertain about any field, return false."
-                ),
-                "images": images,
-            },
-        ],
-        "options": {"temperature": 0.0, "num_predict": 80},
-    }
+    async def _classify_snapshot(snapshot: dict[str, str]) -> dict[str, bool]:
+        encoded = _extract_data_url_base64(str(snapshot.get("dataUrl", "")))
+        if not encoded:
+            return defaults
+        label = str(snapshot.get("label", "camera")).strip() or "camera"
+        key = str(snapshot.get("key", "")).strip()
+        payload = {
+            "model": OOGWAY_OLLAMA_VISION_MODEL,
+            "stream": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a precise terrarium monitor. "
+                        "Analyze tortoise location and posture from a single camera frame. "
+                        "Be conservative — only report true when clearly visible."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Camera label: {label}. Camera key: {key or 'unknown'}. "
+                        "Return ONLY strict JSON with keys: "
+                        '{"scene_lit": boolean, "tortoise_visible": boolean, "in_hut": boolean, "near_hut": boolean, "near_water": boolean, "near_food": boolean, "fallen_over": boolean}. '
+                        "Definitions: in_hut=true only if inside/entering the hide hut. "
+                        "near_hut=true if clearly next to hut entrance/edge. "
+                        "near_water=true if clearly at or next to water bowl. "
+                        "near_food=true if clearly at or next to food dish. "
+                        "fallen_over=true only if upside down or on side. "
+                        "If uncertain, return false."
+                    ),
+                    "images": [encoded],
+                },
+            ],
+            "options": {"temperature": 0.0, "num_predict": 100},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
+                resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+            if resp.status_code >= 400:
+                return defaults
+            parsed = _parse_json_from_text(str(resp.json().get("message", {}).get("content", "")))
+            if not parsed:
+                return defaults
+            result = {
+                "scene_lit": bool(parsed.get("scene_lit", False)),
+                "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
+                "in_hut": bool(parsed.get("in_hut", False)),
+                "near_hut": bool(parsed.get("near_hut", False)),
+                "near_water": bool(parsed.get("near_water", False)),
+                "near_food": bool(parsed.get("near_food", False)),
+                "fallen_over": bool(parsed.get("fallen_over", False)),
+            }
+            if not result["scene_lit"] or not result["tortoise_visible"]:
+                result["in_hut"] = False
+                result["near_hut"] = False
+                result["near_water"] = False
+                result["near_food"] = False
+                result["fallen_over"] = False
+            return result
+        except Exception:
+            return defaults
 
     try:
-        async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
-            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
-        if resp.status_code >= 400:
-            brain_log("vision.state.http_error", level="error", status=resp.status_code)
+        per_camera = await asyncio.gather(*(_classify_snapshot(snapshot) for snapshot in selected), return_exceptions=True)
+        results = [row for row in per_camera if isinstance(row, dict)]
+        if not results:
             return defaults
 
-        content = resp.json().get("message", {}).get("content", "")
-        parsed = _parse_json_from_text(str(content))
-        if not parsed:
-            brain_log("vision.state.parse_error", level="warning", content=str(content)[:280])
-            return defaults
+        scene_lit = any(bool(row.get("scene_lit", False)) for row in results)
+        tortoise_visible = any(bool(row.get("tortoise_visible", False)) for row in results)
+        near_water = any(bool(row.get("near_water", False)) for row in results)
+        near_food = any(bool(row.get("near_food", False)) for row in results)
+        in_hut = any(bool(row.get("in_hut", False)) for row in results)
+        near_hut = any(bool(row.get("near_hut", False)) for row in results)
+        fallen_over = any(bool(row.get("fallen_over", False)) for row in results)
 
-        result: dict[str, bool] = {
-            "scene_lit": bool(parsed.get("scene_lit", False)),
-            "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
-            "in_hut": bool(parsed.get("in_hut", False)),
-            "fallen_over": bool(parsed.get("fallen_over", False)),
-        }
-        # Hard guardrail: suppress all positional flags when dark or tortoise not visible
-        if not result["scene_lit"] or not result["tortoise_visible"]:
-            result["in_hut"] = False
-            result["fallen_over"] = False
+        if not scene_lit or not tortoise_visible:
+            result = dict(defaults)
+        else:
+            if near_water or near_food:
+                in_hut = False
+            result = {
+                "scene_lit": scene_lit,
+                "tortoise_visible": tortoise_visible,
+                "in_hut": in_hut,
+                "near_hut": near_hut,
+                "near_water": near_water,
+                "near_food": near_food,
+                "fallen_over": fallen_over,
+            }
 
-        brain_log("vision.state.ok", result=result)
+        brain_log("vision.state.ok", result=result, cameras=len(results))
         return result
     except Exception as exc:
         brain_log("vision.state.exception", level="error", error=str(exc))
@@ -2750,20 +2797,27 @@ async def run_brain_behavior_check() -> None:
     state = await evaluate_behavior_state(snapshots)
     behavior = await evaluate_eating_drinking(snapshots)
 
+    # Merge independent location cues from behavior and state classifiers.
+    effective_near_water = bool(behavior.get("near_water") or state.get("near_water"))
+    effective_near_food = bool(behavior.get("near_food") or state.get("near_food"))
+    effective_in_hut = bool(state.get("in_hut", False) or state.get("near_hut", False))
+
     # Reconcile classifier conflicts: bowl/drinking observations win over hut location.
-    effective_in_hut = bool(state.get("in_hut", False))
-    if behavior.get("near_water") or behavior.get("near_food") or behavior.get("drinking") or behavior.get("eating"):
+    if effective_near_water or effective_near_food or behavior.get("drinking") or behavior.get("eating"):
         effective_in_hut = False
+    behavior_for_summary = dict(behavior)
+    behavior_for_summary["near_water"] = effective_near_water
+    behavior_for_summary["near_food"] = effective_near_food
     state_for_summary = dict(state)
     state_for_summary["in_hut"] = effective_in_hut
-    brain_log("brain.behavior.classified", state=state)
+    brain_log("brain.behavior.classified", state=state, behavior=behavior_for_summary)
 
     if not state.get("scene_lit") or not state.get("tortoise_visible"):
         return
 
     now_dt = now_utc()
     now_iso = now_dt.isoformat()
-    summary, summary_topic, location_label, links = summarize_observed_state(state_for_summary, behavior)
+    summary, summary_topic, location_label, links = summarize_observed_state(state_for_summary, behavior_for_summary)
     activity_label = summary.removeprefix(f"Oogway is {location_label} and ").rstrip(".") if summary.startswith(f"Oogway is {location_label} and ") else summary
     observation_due = (
         LAST_ACTIVITY_LOG_AT is None
@@ -2777,6 +2831,18 @@ async def run_brain_behavior_check() -> None:
     if observation_due:
         append_to_daily_activity_log(now_iso, summary_topic, summary, links=links)
         remember_memory_event(topic=summary_topic, note=summary, trigger="vision-observation", ts=now_iso)
+        remember_memory_event(
+            topic="visual-location",
+            note=(
+                f"Visual location scan: location={location_label}; "
+                f"near_hut={state.get('near_hut', False)}; "
+                f"near_water={effective_near_water}; "
+                f"near_food={effective_near_food}; "
+                f"in_hut={effective_in_hut}."
+            ),
+            trigger="vision-location",
+            ts=now_iso,
+        )
         LAST_ACTIVITY_LOG_AT = now_dt
 
     # --- Hut entry / exit transition ---
