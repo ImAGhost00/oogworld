@@ -1570,6 +1570,13 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
     else:
         recall_seed = " ".join(str(msg.get("text", "")) for msg in recents[-5:])
     obsidian_recalls = recall_obsidian_memory_lines(recall_seed, limit=4)
+    brain_log(
+        "brain.memory.context",
+        trigger=trigger,
+        recents=len(recents),
+        memoryItems=len(memory),
+        recalls=len(obsidian_recalls),
+    )
 
     if trigger == "mention" and source_message:
         trigger_text = (
@@ -3073,8 +3080,8 @@ async def chat_ws(
     usernameColor: str = "#a3e635",
 ) -> None:
     safe_name = canonical_username(username)
-    safe_color = "black" if textColor == "black" else "white"
-    safe_name_color = usernameColor[:12] if usernameColor.startswith("#") else "#a3e635"
+    connection_color = "black" if textColor == "black" else "white"
+    connection_name_color = usernameColor[:12] if usernameColor.startswith("#") else "#a3e635"
     await ws.accept()
     CHAT_CLIENTS.add(ws)
     await broadcast_viewer_count()
@@ -3088,16 +3095,28 @@ async def chat_ws(
     try:
         while True:
             raw = await ws.receive_text()
-            text = raw.strip()[:240]
+            text = ""
+            msg_color = connection_color
+            msg_name_color = connection_name_color
+            with suppress(Exception):
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    text = str(payload.get("text", "")).strip()[:240]
+                    msg_color = "black" if str(payload.get("textColor", connection_color)).lower() == "black" else "white"
+                    raw_name_color = str(payload.get("usernameColor", connection_name_color))
+                    if raw_name_color.startswith("#"):
+                        msg_name_color = raw_name_color[:12]
+            if not text:
+                text = raw.strip()[:240]
             if not text:
                 continue
             msg: dict[str, Any] = {
                 "id": str(uuid.uuid4()),
                 "kind": "chat",
                 "username": safe_name,
-                "usernameColor": safe_name_color,
+                "usernameColor": msg_name_color,
                 "text": text,
-                "textColor": safe_color,
+                "textColor": msg_color,
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
             append_chat_log(msg)

@@ -1078,6 +1078,9 @@
         }
 
         if (msg.kind === "typing") {
+          if ((msg.username || "").toLowerCase() !== "oogway" || msg.id !== "oogway-typing-indicator") {
+            return;
+          }
           var typingId = "oogway-typing-indicator";
           var existingTyping = document.getElementById(typingId);
           if (!msg.typing) {
@@ -1413,6 +1416,8 @@
         };
 
         state.ws.onclose = function () {
+          var staleTyping = document.getElementById("oogway-typing-indicator");
+          if (staleTyping) staleTyping.remove();
           setTimeout(function () {
             connectChat();
             if (videoPrefs.autoReload) setWebRtcSource(true);
@@ -1423,7 +1428,11 @@
       function sendChat() {
         var text = el.chatInput.value.trim();
         if (!text || !state.ws || state.ws.readyState !== WebSocket.OPEN) return;
-        state.ws.send(text);
+        state.ws.send(JSON.stringify({
+          text: text,
+          textColor: state.chatTextColor,
+          usernameColor: state.badgeColor
+        }));
         el.chatInput.value = "";
       }
 
