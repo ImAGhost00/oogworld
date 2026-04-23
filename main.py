@@ -282,6 +282,9 @@ LAST_HUT_STATE: bool | None = None
 LAST_FALLEN_ALERT_AT: datetime | None = None
 LAST_CARE_OBSERVATION_AT: datetime | None = None
 _CARE_OBSERVATION_INTERVAL_SECONDS = 1800  # log bowl levels to journal every 30 min max
+LAST_MOVEMENT_NOTE_AT: datetime | None = None
+_MOVEMENT_NOTE_INTERVAL_SECONDS = 900
+LAST_CARE_LEVELS: dict[str, str] = {"food": "unknown", "water": "unknown"}
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -624,6 +627,97 @@ def append_to_daily_journal(date_str: str, note_title: str, topic: str, note_tex
     journal_path.write_text(current, encoding="utf-8")
 
 
+def append_to_people_index(person_note_title: str) -> None:
+    directory = ensure_obsidian_memory_dir()
+    index_path = directory / "People Index.md"
+    if index_path.exists():
+        current = index_path.read_text(encoding="utf-8")
+    else:
+        current = "# People Index\n\n## Profiles\n"
+
+    bullet = f"- [[{person_note_title}]]"
+    if bullet not in current:
+        if not current.endswith("\n"):
+            current += "\n"
+        current += bullet + "\n"
+        index_path.write_text(current, encoding="utf-8")
+
+
+def append_person_profile_learning(person_name: str, note: str, ts: str | None = None) -> None:
+    safe_name = canonical_username(person_name)
+    if not safe_name or safe_name.lower() == OOGWAY_BRAIN_NAME.lower():
+        return
+
+    directory = ensure_obsidian_memory_dir()
+    title = f"Profile - {safe_name}"
+    profile_path = directory / f"{slugify_note_title(title)}.md"
+    if profile_path.exists():
+        current = profile_path.read_text(encoding="utf-8")
+    else:
+        current = "\n".join(
+            [
+                f"# {title}",
+                "",
+                "## Relationship",
+                f"- {safe_name} is part of Oogway's circle.",
+                "",
+                "## Interaction History",
+                "",
+            ]
+        )
+
+    timestamp = (ts or datetime.now(timezone.utc).isoformat())[:19]
+    line = f"- {timestamp} {note[:180]}"
+    if line not in current:
+        if "## Interaction History" not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Interaction History\n"
+        if not current.endswith("\n"):
+            current += "\n"
+        current += line + "\n"
+        profile_path.write_text(current, encoding="utf-8")
+
+    append_to_people_index(title)
+
+
+def append_personality_learning(note: str, ts: str | None = None) -> None:
+    directory = ensure_obsidian_memory_dir()
+    title = "Oogway Personality"
+    path = directory / f"{slugify_note_title(title)}.md"
+    if path.exists():
+        current = path.read_text(encoding="utf-8")
+    else:
+        current = "\n".join(
+            [
+                f"# {title}",
+                "",
+                "## Identity",
+                "- Oogway is a Russian tortoise and a living terrarium companion.",
+                "",
+                "## Evolving Traits",
+                "",
+            ]
+        )
+
+    timestamp = (ts or datetime.now(timezone.utc).isoformat())[:19]
+    line = f"- {timestamp} {note[:180]}"
+    if line not in current:
+        if "## Evolving Traits" not in current:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Evolving Traits\n"
+        if not current.endswith("\n"):
+            current += "\n"
+        current += line + "\n"
+        path.write_text(current, encoding="utf-8")
+
+
+def care_level_rank(level: str) -> int:
+    order = {"unknown": 0, "empty": 1, "low": 2, "medium": 3, "full": 4}
+    return order.get(str(level or "unknown").lower(), 0)
+
+
 def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     ts = str(item.get("ts") or datetime.now(timezone.utc).isoformat())
     topic = str(item.get("topic") or "memory").strip() or "memory"
@@ -922,7 +1016,12 @@ def motion_score(previous: bytes, current: bytes) -> float:
 
 
 async def refresh_brain_motion_state() -> bool:
-    global LAST_BRAIN_MOVEMENT_AT
+    global LAST_BRAIN_MOVEMENT_AT, LAST_MOVEMENT_NOTE_AT
+
+    # Skip all vision/motion probes when lights are off; camera observations are unreliable in dark scenes.
+    if not brain_awake_now():
+        brain_log("brain.motion.skip.asleep", level="debug")
+        return False
 
     targets = get_brain_snapshot_targets()
     if not targets:
@@ -934,6 +1033,7 @@ async def refresh_brain_motion_state() -> bool:
     )
 
     motion_detected = False
+    moving_targets: list[str] = []
     for target, probe in zip(targets, probe_values):
         if isinstance(probe, Exception) or not probe:
             continue
@@ -943,10 +1043,19 @@ async def refresh_brain_motion_state() -> bool:
             score = motion_score(previous, probe)
             if score >= OOGWAY_BRAIN_MOTION_THRESHOLD:
                 motion_detected = True
+                moving_targets.append(target.get("label", key))
         LAST_BRAIN_MOTION_PROBES[key] = probe
 
     if motion_detected:
         LAST_BRAIN_MOVEMENT_AT = now_utc()
+        if LAST_MOVEMENT_NOTE_AT is None or (now_utc() - LAST_MOVEMENT_NOTE_AT).total_seconds() >= _MOVEMENT_NOTE_INTERVAL_SECONDS:
+            camera_text = ", ".join(moving_targets) if moving_targets else "camera view"
+            remember_memory_event(
+                topic="movement",
+                note=f"Detected tortoise movement in {camera_text}.",
+                trigger="vision-motion",
+            )
+            LAST_MOVEMENT_NOTE_AT = now_utc()
 
     if not LAST_BRAIN_MOVEMENT_AT:
         return False
@@ -1678,7 +1787,7 @@ async def emit_oogway_care_alert(kind: Literal["food", "water"], reminder: bool 
 
 
 async def run_brain_care_check() -> None:
-    global LAST_BRAIN_CARE_CHECK_AT
+    global LAST_BRAIN_CARE_CHECK_AT, LAST_CARE_LEVELS
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
         brain_log("brain.care.skip.not_configured", level="debug")
@@ -1710,6 +1819,26 @@ async def run_brain_care_check() -> None:
 
     food_level = care_eval.get("food_level", "unknown")
     water_level = care_eval.get("water_level", "unknown")
+
+    # Capture meaningful bowl-level changes for memory callback.
+    for kind, current_level in [("food", food_level), ("water", water_level)]:
+        previous_level = LAST_CARE_LEVELS.get(kind, "unknown")
+        if current_level != previous_level and previous_level != "unknown":
+            prev_rank = care_level_rank(previous_level)
+            curr_rank = care_level_rank(current_level)
+            if prev_rank <= 2 and curr_rank >= 3:
+                remember_memory_event(
+                    topic=f"{kind}-refill",
+                    note=f"{kind.title()} level appears refilled from {previous_level} to {current_level}.",
+                    trigger="vision-care-change",
+                )
+            else:
+                remember_memory_event(
+                    topic=f"{kind}-level-change",
+                    note=f"{kind.title()} level changed from {previous_level} to {current_level}.",
+                    trigger="vision-care-change",
+                )
+        LAST_CARE_LEVELS[kind] = current_level
 
     # Log a passive care observation to the daily journal — throttled to every 30 min
     global LAST_CARE_OBSERVATION_AT
@@ -1764,6 +1893,18 @@ def remember_interaction(trigger: str, source_message: dict[str, Any] | None, re
         note=f"{(source_message or {}).get('username', 'Someone')}: {source_text[:140]} | Oogway: {reply_text[:140]}",
         trigger=trigger,
     )
+    with suppress(Exception):
+        person = str((source_message or {}).get("username", "")).strip()
+        if person:
+            append_person_profile_learning(
+                person,
+                f"Conversation: \"{source_text[:120]}\" | Oogway replied: \"{reply_text[:120]}\"",
+                ts=str((source_message or {}).get("ts", "")) or None,
+            )
+            append_personality_learning(
+                f"Interaction with {person}: responded in {trigger} context.",
+                ts=str((source_message or {}).get("ts", "")) or None,
+            )
 
 
 def brain_awake_now() -> bool:
@@ -2437,6 +2578,12 @@ async def chat_ws(
                 trigger="chat-message",
                 ts=msg["ts"],
             )
+            with suppress(Exception):
+                append_person_profile_learning(
+                    safe_name,
+                    f"Chat message: \"{text[:160]}\"",
+                    ts=msg["ts"],
+                )
 
             is_self = safe_name.lower() == OOGWAY_BRAIN_NAME.lower()
             if OOGWAY_BRAIN_ENABLED and is_brain_configured() and (not is_self) and should_trigger_oogway_mention(text):
