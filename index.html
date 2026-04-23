@@ -1071,8 +1071,34 @@
       }
 
       function appendChatMessage(msg) {
-        if (msg.id && state.seenMessageIds[msg.id]) return;
-        if (msg.id) state.seenMessageIds[msg.id] = true;
+        if (msg.kind !== "typing") {
+          if (msg.id && state.seenMessageIds[msg.id]) return;
+          if (msg.id) state.seenMessageIds[msg.id] = true;
+        }
+
+        if (msg.kind === "typing") {
+          var typingId = "oogway-typing-indicator";
+          var existingTyping = document.getElementById(typingId);
+          if (!msg.typing) {
+            if (existingTyping) existingTyping.remove();
+            return;
+          }
+
+          if (!existingTyping) {
+            var typingRow = document.createElement("div");
+            typingRow.id = typingId;
+            typingRow.className = "mb-1 leading-snug text-slate-400 italic";
+            typingRow.textContent = "Oogway is typing...";
+            el.chatMessages.appendChild(typingRow);
+          }
+          el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+          return;
+        }
+
+        if ((msg.username || "").toLowerCase() === "oogway") {
+          var staleTyping = document.getElementById("oogway-typing-indicator");
+          if (staleTyping) staleTyping.remove();
+        }
 
         var row = document.createElement("div");
         row.className = "mb-1 leading-snug";

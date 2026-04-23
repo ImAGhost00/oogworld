@@ -266,6 +266,8 @@ CHAT_CLIENTS: set[WebSocket] = set()
 ADMIN_TOKENS: dict[str, datetime] = {}
 DAYLIGHT_TASK: asyncio.Task[Any] | None = None
 BRAIN_TASK: asyncio.Task[Any] | None = None
+BRAIN_QUEUE_TASK: asyncio.Task[Any] | None = None
+BRAIN_RESPONSE_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
 BRAIN_LOCK = asyncio.Lock()
 LAST_BRAIN_SPOKE_AT: datetime | None = None
 LAST_BRAIN_MOVEMENT_AT: datetime | None = None
@@ -300,6 +302,7 @@ REPORT_CONFIG: dict[str, dict[str, str]] = {
 }
 
 BRAIN_USERNAME_COLOR = "#facc15"
+OOGWAY_TYPING_ID = "oogway-typing-indicator"
 
 
 def derive_stream_urls(base: str) -> dict[str, str]:
@@ -767,6 +770,20 @@ async def broadcast_viewer_count() -> None:
     CHAT_CLIENTS.difference_update(dead)
 
 
+async def broadcast_oogway_typing(active: bool) -> None:
+    await broadcast_chat(
+        {
+            "id": OOGWAY_TYPING_ID,
+            "kind": "typing",
+            "username": OOGWAY_BRAIN_NAME,
+            "usernameColor": BRAIN_USERNAME_COLOR,
+            "text": "Oogway is typing...",
+            "typing": bool(active),
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+
 async def send_ntfy_message(
     topic: str,
     message: str,
@@ -1032,6 +1049,37 @@ def _extract_data_url_base64(data_url: str) -> str:
     return data_url.split(",", 1)[1].strip()
 
 
+def _select_single_snapshot_image(snapshots: list[dict[str, str]], hint_text: str = "") -> str:
+    """Pick one snapshot image, prioritizing water/food prompts when possible."""
+    hint = (hint_text or "").lower()
+    wants_water = any(token in hint for token in ["water", "drink", "drinking", "bowl", "hydrate"])
+    wants_food = any(token in hint for token in ["food", "feed", "feeding", "eat", "eating", "kale", "lettuce"])
+
+    def _score(snapshot: dict[str, str]) -> int:
+        meta = " ".join(
+            [
+                str(snapshot.get("key", "")),
+                str(snapshot.get("label", "")),
+                str(snapshot.get("url", "")),
+            ]
+        ).lower()
+        score = 0
+        if wants_water and "water" in meta:
+            score += 10
+        if wants_food and any(token in meta for token in ["food", "hut", "cam"]):
+            score += 5
+        if "primary" in meta:
+            score += 1
+        return score
+
+    ordered = sorted(snapshots, key=_score, reverse=True)
+    for snapshot in ordered:
+        encoded = _extract_data_url_base64(snapshot.get("dataUrl", ""))
+        if encoded:
+            return encoded
+    return ""
+
+
 def _parse_json_from_text(content: str) -> dict[str, Any] | None:
     text = str(content or "")
     start = text.find("{")
@@ -1051,11 +1099,8 @@ async def call_ollama_for_oogway(prompt_text: str, snapshots: list[dict[str, str
         "You are in the OogWorld live chat. Be warm, brief, and grounded in current context."
     )
 
-    image_payload: list[str] = []
-    for snapshot in snapshots[:2]:
-        encoded = _extract_data_url_base64(snapshot.get("dataUrl", ""))
-        if encoded:
-            image_payload.append(encoded)
+    selected_image = _select_single_snapshot_image(snapshots, prompt_text)
+    image_payload: list[str] = [selected_image] if selected_image else []
 
     async def _chat_with(model_name: str, include_images: bool) -> str:
         brain_log(
@@ -1126,8 +1171,8 @@ async def vision_json_classify(
         brain_log("vision.classify.skip.no_model", keys=keys, level="warning")
         return defaults
 
-    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
-    images = [img for img in images if img]
+    selected_image = _select_single_snapshot_image(snapshots)
+    images = [selected_image] if selected_image else []
     if not images:
         brain_log("vision.classify.skip.no_images", keys=keys, level="warning")
         return defaults
@@ -1186,8 +1231,8 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]
         brain_log("vision.care.skip.no_model", level="warning")
         return _LEVEL_DEFAULTS
 
-    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
-    images = [img for img in images if img]
+    selected_image = _select_single_snapshot_image(snapshots, "food water bowls")
+    images = [selected_image] if selected_image else []
     if not images:
         brain_log("vision.care.skip.no_images", level="warning")
         return _LEVEL_DEFAULTS
@@ -1269,8 +1314,8 @@ async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str,
         brain_log("vision.behavior.skip.no_model", level="warning")
         return defaults
 
-    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
-    images = [img for img in images if img]
+    selected_image = _select_single_snapshot_image(snapshots, "tortoise eating drinking")
+    images = [selected_image] if selected_image else []
     if not images:
         brain_log("vision.behavior.skip.no_images", level="warning")
         return defaults
@@ -1358,8 +1403,8 @@ async def evaluate_behavior_state(snapshots: list[dict[str, str]]) -> dict[str, 
     if not snapshots or not OOGWAY_OLLAMA_VISION_MODEL:
         return defaults
 
-    images = [_extract_data_url_base64(snap.get("dataUrl", "")) for snap in snapshots[:3]]
-    images = [img for img in images if img]
+    selected_image = _select_single_snapshot_image(snapshots, "tortoise in hut fallen over")
+    images = [selected_image] if selected_image else []
     if not images:
         return defaults
 
@@ -1727,6 +1772,38 @@ def should_trigger_oogway_mention(text: str) -> bool:
     return trigger in text.lower()
 
 
+async def enqueue_brain_response(trigger: str, source_message: dict[str, Any] | None = None) -> bool:
+    queue = BRAIN_RESPONSE_QUEUE
+    if queue is None:
+        brain_log("brain.queue.missing", trigger=trigger, level="warning")
+        return False
+
+    if trigger == "periodic" and queue.qsize() > 0:
+        brain_log("brain.queue.skip.periodic_busy", queued=queue.qsize(), level="debug")
+        return False
+
+    await queue.put({"trigger": trigger, "source_message": source_message})
+    brain_log("brain.queue.enqueued", trigger=trigger, queued=queue.qsize())
+    return True
+
+
+async def brain_response_worker() -> None:
+    while True:
+        if BRAIN_RESPONSE_QUEUE is None:
+            await asyncio.sleep(0.2)
+            continue
+        item = await BRAIN_RESPONSE_QUEUE.get()
+        try:
+            await run_oogway_brain(
+                trigger=str(item.get("trigger", "periodic")),
+                source_message=item.get("source_message"),
+            )
+        except Exception as exc:
+            brain_log("brain.queue.worker_error", level="error", error=str(exc))
+        finally:
+            BRAIN_RESPONSE_QUEUE.task_done()
+
+
 async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None = None) -> None:
     global LAST_BRAIN_SPOKE_AT
 
@@ -1767,7 +1844,11 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
         prompt_text = build_oogway_prompt(trigger, source_message)
         snapshots = await capture_brain_snapshots_data_urls()
         brain_log("brain.reply.request", trigger=trigger, snapshots=len(snapshots), promptChars=len(prompt_text))
-        reply = await call_ollama_for_oogway(prompt_text, snapshots)
+        await broadcast_oogway_typing(True)
+        try:
+            reply = await call_ollama_for_oogway(prompt_text, snapshots)
+        finally:
+            await broadcast_oogway_typing(False)
         if not reply:
             brain_log("brain.reply.empty", trigger=trigger, level="warning")
             return
@@ -1865,7 +1946,7 @@ async def oogway_brain_loop() -> None:
             await run_brain_care_check()
             await run_brain_eating_check()
             await run_brain_behavior_check()
-            await run_oogway_brain(trigger="periodic")
+            await enqueue_brain_response(trigger="periodic")
         except Exception:
             # Keep loop alive even if upstream LLM/camera calls fail.
             pass
@@ -2022,8 +2103,10 @@ async def startup() -> None:
     ensure_list_file(CHAT_LOG_PATH)
     ensure_obsidian_memory_dir()
     await refresh_daylight_cache(force=True)
-    global DAYLIGHT_TASK, BRAIN_TASK
+    global DAYLIGHT_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
     DAYLIGHT_TASK = asyncio.create_task(daylight_refresh_loop())
+    BRAIN_RESPONSE_QUEUE = asyncio.Queue()
+    BRAIN_QUEUE_TASK = asyncio.create_task(brain_response_worker())
     brain_log(
         "brain.startup",
         enabled=OOGWAY_BRAIN_ENABLED,
@@ -2043,13 +2126,17 @@ async def startup() -> None:
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
-    global DAYLIGHT_TASK, BRAIN_TASK
+    global DAYLIGHT_TASK, BRAIN_TASK, BRAIN_QUEUE_TASK, BRAIN_RESPONSE_QUEUE
     if DAYLIGHT_TASK:
         DAYLIGHT_TASK.cancel()
         DAYLIGHT_TASK = None
     if BRAIN_TASK:
         BRAIN_TASK.cancel()
         BRAIN_TASK = None
+    if BRAIN_QUEUE_TASK:
+        BRAIN_QUEUE_TASK.cancel()
+        BRAIN_QUEUE_TASK = None
+    BRAIN_RESPONSE_QUEUE = None
 
 
 @app.get("/")
@@ -2180,11 +2267,13 @@ async def brain_trigger(request: Request) -> dict[str, Any]:
     """Admin-only: immediately fire the brain loop (mention trigger) bypassing sleep/interval guards."""
     require_admin(request)
     if not OOGWAY_BRAIN_ENABLED:
-        return {"ok": False, "error": "OOGWAY_BRAIN_ENABLED is false — enable it in Admin > AI Settings"}
+        return {"ok": False, "error": "OOGWAY_BRAIN_ENABLED is false - enable it in Admin > AI Settings"}
     if not is_brain_configured():
         return {"ok": False, "error": "Brain not configured (missing model or Ollama base URL)"}
-    asyncio.create_task(run_oogway_brain(trigger="manual"))
-    return {"ok": True, "message": "Brain triggered — check chat in a moment"}
+    queued = await enqueue_brain_response(trigger="manual")
+    if not queued:
+        return {"ok": False, "error": "Brain queue unavailable"}
+    return {"ok": True, "message": "Brain queued - check chat in a moment"}
 
 
 @app.post("/api/admin/login")
@@ -2358,7 +2447,7 @@ async def chat_ws(
                     user=safe_name,
                     text=text[:180],
                 )
-                asyncio.create_task(run_oogway_brain(trigger="mention", source_message=msg))
+                await enqueue_brain_response(trigger="mention", source_message=msg)
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)
         await broadcast_viewer_count()
