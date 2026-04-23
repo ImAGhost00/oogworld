@@ -1115,7 +1115,7 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
 
     if trigger == "chat-message" or topic == "chat":
         append_to_daily_chat_log(ts, note_text)
-        return
+        topic = "chat"
 
     directory = ensure_obsidian_memory_dir()
     short_id = str(uuid.uuid4())[:8]
@@ -1636,6 +1636,11 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
         for msg in recents
         if msg.get("text")
     ]
+    recent_oogway_lines = [
+        str(msg.get("text", "")).strip()
+        for msg in recents
+        if str(msg.get("username", "")).strip().lower() == OOGWAY_BRAIN_NAME.lower() and msg.get("text")
+    ]
     memory_lines = [
         f"[{m.get('ts', '')}] {m.get('topic', 'memory')}: {m.get('note', '')}"
         for m in memory
@@ -1656,19 +1661,20 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
     )
 
     if trigger in {"mention", "chat"} and source_message:
+        user_text = str(source_message.get("text", "")).strip()
         trigger_text = (
-            "You were mentioned in chat. Reply directly to the user in 1-3 short sentences, "
+            "A user spoke to you directly in chat. Answer their exact message first in 1-3 short sentences, "
             "friendly, alive, and specific."
         )
         if sleepy_mode:
             trigger_text = (
-                "You were mentioned during bedtime/night. Reply in 1-2 short sentences, "
+                "A user spoke to you during bedtime/night. Reply in 1-2 short sentences, "
                 "sleepy and mildly annoyed, like a tired tortoise. "
                 "Say you are trying to sleep, but still answer briefly if asked about food/water."
             )
         mention_line = (
-            f"Mention came from {source_message.get('username', 'Anonymous')}: "
-            f"{source_message.get('text', '')}"
+            f"User message from {source_message.get('username', 'Anonymous')}: "
+            f"{user_text}"
         )
     else:
         trigger_text = (
@@ -1705,7 +1711,12 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             "Obsidian recalls:",
             "\n".join(obsidian_recalls) or "(none)",
             "",
+            "Recent Oogway replies to avoid repeating verbatim:",
+            "\n".join(f"- {line[:140]}" for line in recent_oogway_lines[-3:]) or "(none)",
+            "",
             "Rules: keep under 240 chars, no roleplay markers, no markdown.",
+            "If the user asked a question, answer the question directly before any terrarium status update.",
+            "Do not repeat the same sentence from your last few replies unless the user explicitly asks you to repeat it.",
             "Do not default to kale, feeding, or care reminders unless the current context genuinely supports it.",
         ]
     )
@@ -2516,7 +2527,7 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 
         sleepy_mode = not brain_awake_now()
         if sleepy_mode:
-            if trigger == "mention":
+            if trigger in {"mention", "chat"}:
                 brain_log("brain.reply.sleeping.generate", trigger=trigger)
             elif trigger == "manual":
                 pass  # manual trigger bypasses sleep gate — fall through to normal reply
