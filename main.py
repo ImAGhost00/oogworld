@@ -89,6 +89,10 @@ OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS = max(
     30,
     int(os.getenv("OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS", "60")),
 )
+OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS = max(
+    300,
+    int(os.getenv("OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS", "1200")),
+)
 OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS = max(
     300,
     int(os.getenv("OOGWAY_BRAIN_FALLEN_ALERT_COOLDOWN_SECONDS", "1800")),
@@ -296,6 +300,11 @@ _CARE_OBSERVATION_INTERVAL_SECONDS = 1800  # log bowl levels to journal every 30
 LAST_MOVEMENT_NOTE_AT: datetime | None = None
 _MOVEMENT_NOTE_INTERVAL_SECONDS = 900
 LAST_CARE_LEVELS: dict[str, str] = {"food": "unknown", "water": "unknown"}
+LAST_ACTIVITY_LOG_AT: datetime | None = None
+LAST_OBSERVED_SUMMARY: str = ""
+LAST_OBSERVED_TOPIC: str = "routine"
+LAST_OBSERVED_LOCATION: str = "unknown"
+LAST_OBSERVED_ACTIVITY: str = "unknown"
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -638,6 +647,47 @@ def append_to_daily_journal(date_str: str, note_title: str, topic: str, note_tex
     journal_path.write_text(current, encoding="utf-8")
 
 
+def append_to_daily_activity_log(ts: str, topic: str, summary: str, links: list[str] | None = None) -> None:
+    directory = ensure_obsidian_memory_dir()
+    date_prefix = ts[:10]
+    time_str = ts[11:19] if len(ts) >= 19 else ""
+    daily_title = f"Daily Log - {date_prefix}"
+    path = directory / f"{slugify_note_title(daily_title)}.md"
+    if path.exists():
+        current = path.read_text(encoding="utf-8")
+    else:
+        current = f"# {daily_title}\n\n## Events\n"
+
+    if "## Activity" not in current:
+        if not current.endswith("\n"):
+            current += "\n"
+        current += "\n## Activity\n"
+
+    link_text = " ".join(dict.fromkeys(links or []))
+    bullet = f"- `{time_str}` **{topic}** {summary[:180]}"
+    if link_text:
+        bullet += f" {link_text}"
+
+    if bullet not in current:
+        insert_at = current.find("## Activity")
+        if insert_at == -1:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += "\n## Activity\n"
+            insert_at = current.find("## Activity")
+        section_start = insert_at + len("## Activity")
+        next_section = current.find("\n## ", section_start)
+        prefix = current[: next_section if next_section != -1 else len(current)]
+        suffix = current[next_section:] if next_section != -1 else ""
+        if not prefix.endswith("\n"):
+            prefix += "\n"
+        prefix += bullet + "\n"
+        current = prefix + suffix
+        path.write_text(current, encoding="utf-8")
+
+    append_to_obsidian_topic(f"Topic - {topic.title()}", daily_title, summary)
+
+
 def infer_chat_memory_topic(note_text: str) -> tuple[str, str]:
     raw_text = str(note_text or "").strip()
     speaker = ""
@@ -666,6 +716,82 @@ def infer_chat_memory_topic(note_text: str) -> tuple[str, str]:
     if speaker and speaker.lower() != OOGWAY_BRAIN_NAME.lower():
         return speaker, f"[[Profile {speaker}]]"
     return "Human Chat", "[[Topic - Human-Chat]]"
+
+
+def infer_memory_topic_slug(text: str, fallback: str = "routine") -> str:
+    lowered = str(text or "").lower()
+    if any(token in lowered for token in ["food", "feed", "feeding", "hungry", "kale", "greens", "lettuce", "eat", "eating"]):
+        return "feeding"
+    if any(token in lowered for token in ["water", "drink", "drinking", "hydrate", "bowl"]):
+        return "watering"
+    if any(token in lowered for token in ["sleep", "sleepy", "bedtime", "nap", "hut", "hide"]):
+        return "sleep"
+    if any(token in lowered for token in ["cat", "cats", "kitty", "kitten"]):
+        return "cats"
+    if any(token in lowered for token in ["health", "hurt", "vet", "shell", "eyes", "breathe", "breathing", "fallen", "flip"]):
+        return "health"
+    if any(token in lowered for token in ["walk", "walking", "move", "moving", "roam", "explore", "sun", "bask"]):
+        return "behavior"
+    if "marcus" in lowered:
+        return "marcus"
+    return fallback
+
+
+def recent_daily_activity_lines(limit: int = 6) -> list[str]:
+    date_str = now_utc().astimezone(get_local_tz()).date().isoformat()
+    note_path = ensure_obsidian_memory_dir() / f"{slugify_note_title(f'Daily Log - {date_str}')}.md"
+    if not note_path.exists():
+        return []
+    try:
+        content = note_path.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    lines: list[str] = []
+    in_section = False
+    for raw in content.splitlines():
+        line = raw.strip()
+        if line == "## Activity":
+            in_section = True
+            continue
+        if in_section and line.startswith("## "):
+            break
+        if in_section and line.startswith("- "):
+            lines.append(line)
+    return lines[-max(1, limit):]
+
+
+def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) -> tuple[str, str, str, list[str]]:
+    location = "inside the hut" if state.get("in_hut") else "out in the open"
+    topic = "routine"
+    activity = "resting"
+    links: list[str] = []
+
+    if state.get("fallen_over"):
+        activity = "fallen over"
+        topic = "fallen"
+        links.append("[[Topic - Health]]")
+    elif behavior.get("drinking"):
+        activity = "drinking from the water dish"
+        topic = "watering"
+        links.append("[[Topic - Watering]]")
+    elif behavior.get("eating"):
+        activity = "eating from the food dish"
+        topic = "feeding"
+        links.append("[[Topic - Feeding]]")
+    elif state.get("in_hut"):
+        activity = "resting quietly in the hut"
+        topic = "sleep"
+        links.append("[[Topic - Sleep]]")
+    elif behavior.get("tortoise_visible"):
+        activity = "out exploring the enclosure"
+        topic = "behavior"
+        links.append("[[Topic - Behavior]]")
+
+    if state.get("in_hut"):
+        links.append("[[Topic - Hut]]")
+
+    summary = f"Oogway is {location} and {activity}."
+    return summary, topic, location, list(dict.fromkeys(links))
 
 
 def append_to_daily_chat_log(ts: str, note_text: str) -> None:
@@ -1419,6 +1545,8 @@ async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
 def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sleepy_mode: bool = False) -> str:
     recents = read_chat_log()[-OOGWAY_BRAIN_CONTEXT_CHAT_CAP:]
     memory = read_recent_obsidian_memories(limit=14)
+    activity_lines = recent_daily_activity_lines(limit=6)
+    current_state_line = LAST_OBSERVED_SUMMARY or (activity_lines[-1] if activity_lines else "")
     recent_lines = [
         f"[{msg.get('ts', '')}] {msg.get('username', 'Anonymous')}: {msg.get('text', '')}"
         for msg in recents
@@ -1453,8 +1581,8 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
         )
     else:
         trigger_text = (
-            "Write a short spontaneous update as Oogway. Mention what you notice from the camera if visible, "
-            "or share a brief thought about your day with humans/cats/terrarium."
+            "Write a short spontaneous update as Oogway. Prefer what you are doing, where you are, "
+            "or what is on your mind right now in the terrarium."
         )
         mention_line = "No direct mention in this turn."
 
@@ -1466,11 +1594,16 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             trigger_text,
             mention_line,
             f"Camera coverage this turn: {camera_labels}",
+            f"Current observed state: {current_state_line or '(unknown right now)'}",
             "",
             "Vision priorities:",
-            "- Watch for movement: poking head out, walking, changing position, active vs resting.",
-            "- Watch care events: fresh food added, water bowl refill, visible eating or drinking.",
+            "- Watch for location and routine: in hut, out exploring, basking, resting, drinking, eating.",
+            "- Notice day-to-day activity patterns before fixating on food or water.",
+            "- Only focus on food/water when there is a visible care event, empty bowl, or explicit user question.",
             "- If uncertain, say so briefly instead of making up details.",
+            "",
+            "Recent daily activity:",
+            "\n".join(activity_lines[-6:]) or "(none)",
             "",
             "Recent chat:",
             "\n".join(recent_lines[-12:]) or "(none)",
@@ -1482,6 +1615,7 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             "\n".join(obsidian_recalls) or "(none)",
             "",
             "Rules: keep under 240 chars, no roleplay markers, no markdown.",
+            "Do not default to kale, feeding, or care reminders unless the current context genuinely supports it.",
         ]
     )
 
@@ -1728,8 +1862,8 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]
         result = {
             "food_level": food_level,
             "water_level": water_level,
-            "food_empty": food_level in ("empty", "low"),
-            "water_empty": water_level in ("empty", "low"),
+            "food_empty": food_level == "empty",
+            "water_empty": water_level == "empty",
         }
         brain_log("vision.care.ok", result=result)
         return result
@@ -2201,25 +2335,20 @@ async def run_brain_care_check() -> None:
 
 
 def remember_interaction(trigger: str, source_message: dict[str, Any] | None, reply_text: str) -> None:
-    topic = "routine"
-    source_text = (source_message or {}).get("text", "")
-    lowered = source_text.lower()
-    if "cat" in lowered or "cats" in lowered:
-        topic = "cats"
-    elif "feed" in lowered or "food" in lowered:
-        topic = "feeding"
-    elif "water" in lowered or "humid" in lowered or "humidity" in lowered:
-        topic = "care"
-    elif trigger == "mention":
-        topic = "human-chat"
+    source_text = str((source_message or {}).get("text", ""))
+    person = str((source_message or {}).get("username", "")).strip()
+    if source_text:
+        topic = infer_memory_topic_slug(source_text, fallback="human-chat" if trigger == "mention" else "routine")
+        note = f"{person or 'Someone'}: {source_text[:140]} | Oogway: {reply_text[:140]}"
+    else:
+        topic = infer_memory_topic_slug(f"{LAST_OBSERVED_SUMMARY} {reply_text}", fallback=LAST_OBSERVED_TOPIC or "routine")
+        if LAST_OBSERVED_SUMMARY:
+            note = f"Daytime self-observation: {LAST_OBSERVED_SUMMARY[:140]} Oogway said: {reply_text[:140]}"
+        else:
+            note = f"Oogway daily update: {reply_text[:180]}"
 
-    remember_memory_event(
-        topic=topic,
-        note=f"{(source_message or {}).get('username', 'Someone')}: {source_text[:140]} | Oogway: {reply_text[:140]}",
-        trigger=trigger,
-    )
+    remember_memory_event(topic=topic, note=note, trigger=trigger)
     with suppress(Exception):
-        person = str((source_message or {}).get("username", "")).strip()
         if person:
             append_person_profile_learning(
                 person,
@@ -2336,6 +2465,8 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 async def run_brain_behavior_check() -> None:
     """Periodic vision check for hut entry/exit, fallen over, fed, watered — logs everything to Obsidian."""
     global LAST_BEHAVIOR_CHECK_AT, LAST_HUT_STATE, LAST_FALLEN_ALERT_AT
+    global LAST_ACTIVITY_LOG_AT, LAST_OBSERVED_SUMMARY, LAST_OBSERVED_TOPIC
+    global LAST_OBSERVED_LOCATION, LAST_OBSERVED_ACTIVITY
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
         return
@@ -2355,6 +2486,7 @@ async def run_brain_behavior_check() -> None:
         return
 
     state = await evaluate_behavior_state(snapshots)
+    behavior = await evaluate_eating_drinking(snapshots)
     brain_log("brain.behavior.classified", state=state)
 
     if not state.get("scene_lit") or not state.get("tortoise_visible"):
@@ -2362,6 +2494,21 @@ async def run_brain_behavior_check() -> None:
 
     now_dt = now_utc()
     now_iso = now_dt.isoformat()
+    summary, summary_topic, location_label, links = summarize_observed_state(state, behavior)
+    activity_label = summary.removeprefix(f"Oogway is {location_label} and ").rstrip(".") if summary.startswith(f"Oogway is {location_label} and ") else summary
+    observation_due = (
+        LAST_ACTIVITY_LOG_AT is None
+        or (now_dt - LAST_ACTIVITY_LOG_AT).total_seconds() >= OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS
+        or summary != LAST_OBSERVED_SUMMARY
+    )
+    LAST_OBSERVED_SUMMARY = summary
+    LAST_OBSERVED_TOPIC = summary_topic
+    LAST_OBSERVED_LOCATION = location_label
+    LAST_OBSERVED_ACTIVITY = activity_label
+    if observation_due:
+        append_to_daily_activity_log(now_iso, summary_topic, summary, links=links)
+        remember_memory_event(topic=summary_topic, note=summary, trigger="vision-observation", ts=now_iso)
+        LAST_ACTIVITY_LOG_AT = now_dt
 
     # --- Hut entry / exit transition ---
     in_hut_now = state.get("in_hut", False)
