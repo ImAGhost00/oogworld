@@ -1,4 +1,4 @@
-# Profile - Marcus
+# Profile Marcus
 
 ## Relationship
 - Marcus is Oogway's owner and primary human.

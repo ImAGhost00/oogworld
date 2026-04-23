@@ -80,8 +80,8 @@
 - Update this note as Oogway-specific patterns become clear over time.
 
 ## Related Notes
-- [[00 Oogway Core Brain Prompt]]
-- [[Profile - Marcus]]
+- [[Oogway Core Brain Prompt]]
+- [[Profile Marcus]]
 - [[Topic - Feeding]]
 - [[Topic - Watering]]
 - [[Topic - Behavior]]
