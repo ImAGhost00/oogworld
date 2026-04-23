@@ -139,6 +139,11 @@ CHAT_RETENTION_SWEEP_SECONDS = max(30, int(os.getenv("CHAT_RETENTION_SWEEP_SECON
 OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS = max(20, int(os.getenv("OOGWAY_BRAIN_CHAT_TIMEOUT_SECONDS", "45")))
 OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS = max(12, int(os.getenv("OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS", "30")))
 OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS = max(4, int(os.getenv("OOGWAY_BRAIN_CAPTURE_TIMEOUT_SECONDS", "6")))
+OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES = max(80, int(os.getenv("OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES", "320")))
+OOGWAY_BRAIN_MEMORY_MAX_CHAT_LINES = max(80, int(os.getenv("OOGWAY_BRAIN_MEMORY_MAX_CHAT_LINES", "420")))
+OOGWAY_BRAIN_MEMORY_MAX_ACTIVITY_LINES = max(60, int(os.getenv("OOGWAY_BRAIN_MEMORY_MAX_ACTIVITY_LINES", "260")))
+OOGWAY_BRAIN_MEMORY_MAX_PROFILE_LINES = max(30, int(os.getenv("OOGWAY_BRAIN_MEMORY_MAX_PROFILE_LINES", "160")))
+OOGWAY_BRAIN_MEMORY_DEDUP_LOOKBACK = max(10, int(os.getenv("OOGWAY_BRAIN_MEMORY_DEDUP_LOOKBACK", "40")))
 BRAIN_CONFIG_PATH = Path(os.getenv("BRAIN_CONFIG_PATH", BASE_DIR / "brain_config.json"))
 
 # ---------------------------------------------------------------------------
@@ -298,6 +303,7 @@ class AdminReportResetRequest(BaseModel):
 app = FastAPI(title="OogWorld", version=APP_VERSION)
 app.mount("/images", StaticFiles(directory=BASE_DIR / "images"), name="images")
 CHAT_CLIENTS: set[WebSocket] = set()
+CHAT_CLIENT_NAMES: dict[WebSocket, str] = {}
 ADMIN_TOKENS: dict[str, datetime] = {}
 DAYLIGHT_TASK: asyncio.Task[Any] | None = None
 CHAT_RETENTION_TASK: asyncio.Task[Any] | None = None
@@ -594,6 +600,83 @@ def extract_memory_terms(text: str) -> set[str]:
     return {term for term in terms if term not in _MEMORY_STOPWORDS}
 
 
+def _normalize_memory_text(text: str) -> str:
+    lowered = str(text or "").lower()
+    lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    lowered = re.sub(r"\s+", " ", lowered).strip()
+    return lowered[:220]
+
+
+def _trim_section_bullets(content: str, section_header: str, max_bullets: int) -> str:
+    lines = content.splitlines()
+    section_start = -1
+    for idx, raw in enumerate(lines):
+        if raw.strip() == section_header:
+            section_start = idx
+            break
+    if section_start == -1:
+        return content
+
+    section_end = len(lines)
+    for idx in range(section_start + 1, len(lines)):
+        if lines[idx].strip().startswith("## "):
+            section_end = idx
+            break
+
+    bullet_idxs = [
+        idx
+        for idx in range(section_start + 1, section_end)
+        if lines[idx].strip().startswith("- ")
+    ]
+    overflow = len(bullet_idxs) - max(1, max_bullets)
+    if overflow <= 0:
+        return content
+
+    drop_set = set(bullet_idxs[:overflow])
+    new_lines = [line for idx, line in enumerate(lines) if idx not in drop_set]
+    compacted = "\n".join(new_lines)
+    if content.endswith("\n"):
+        compacted += "\n"
+    return compacted
+
+
+def prune_generated_memory_notes() -> int:
+    directory = ensure_obsidian_memory_dir()
+    generated_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} .+ [0-9a-f]{8}\.md$")
+    generated_notes = [
+        note
+        for note in list_obsidian_memory_notes()
+        if generated_pattern.match(note.name)
+    ]
+    if len(generated_notes) <= OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES:
+        return 0
+
+    deleted = 0
+    for note_path in generated_notes[OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES :]:
+        with suppress(Exception):
+            note_path.unlink()
+            deleted += 1
+    return deleted
+
+
+def is_duplicate_memory_event(topic: str, note_text: str) -> bool:
+    normalized = _normalize_memory_text(note_text)
+    if not normalized:
+        return False
+    lookback = max(1, OOGWAY_BRAIN_MEMORY_DEDUP_LOOKBACK)
+    topic_key = str(topic or "").strip().lower()
+    for item in read_recent_obsidian_memories(limit=lookback):
+        existing_topic = str(item.get("topic") or "").strip().lower()
+        if existing_topic != topic_key:
+            continue
+        existing_note = _normalize_memory_text(str(item.get("note") or ""))
+        if not existing_note:
+            continue
+        if normalized == existing_note or normalized in existing_note or existing_note in normalized:
+            return True
+    return False
+
+
 def list_obsidian_memory_notes() -> list[Path]:
     directory = ensure_obsidian_memory_dir()
     return sorted(
@@ -705,7 +788,11 @@ def append_to_daily_activity_log(ts: str, topic: str, summary: str, links: list[
             prefix += "\n"
         prefix += bullet + "\n"
         current = prefix + suffix
-        path.write_text(current, encoding="utf-8")
+
+    compacted = _trim_section_bullets(current, "## Activity", OOGWAY_BRAIN_MEMORY_MAX_ACTIVITY_LINES)
+    if compacted != current or not path.exists():
+        path.write_text(compacted, encoding="utf-8")
+        current = compacted
 
     append_to_obsidian_topic(f"Topic - {topic.title()}", daily_title, summary)
 
@@ -848,6 +935,7 @@ def append_to_daily_chat_log(ts: str, note_text: str) -> None:
                 "",
             ]
         )
+    original = current
 
     topic_bullet = f"- {topic_link}"
     if topic_bullet not in current:
@@ -890,6 +978,10 @@ def append_to_daily_chat_log(ts: str, note_text: str) -> None:
                 prefix += "\n"
             prefix += line + "\n"
             current = prefix + suffix
+    compacted = _trim_section_bullets(current, "## Messages", OOGWAY_BRAIN_MEMORY_MAX_CHAT_LINES)
+    if compacted != current:
+        current = compacted
+    if current != original:
         path.write_text(current, encoding="utf-8")
 
 
@@ -1044,6 +1136,7 @@ def append_person_profile_learning(person_name: str, note: str, ts: str | None =
 
     directory = ensure_obsidian_memory_dir()
     title, profile_path, current = _merge_legacy_profile_if_needed(directory, safe_name)
+    original = current
 
     timestamp = local_obsidian_timestamp(ts)
     line = f"- {timestamp} {note[:180]}"
@@ -1055,6 +1148,10 @@ def append_person_profile_learning(person_name: str, note: str, ts: str | None =
         if not current.endswith("\n"):
             current += "\n"
         current += line + "\n"
+    compacted = _trim_section_bullets(current, "## Interaction History", OOGWAY_BRAIN_MEMORY_MAX_PROFILE_LINES)
+    if compacted != current:
+        current = compacted
+    if current != original:
         profile_path.write_text(current, encoding="utf-8")
 
     append_to_people_index(title)
@@ -1086,6 +1183,7 @@ def append_personality_learning(note: str, ts: str | None = None) -> None:
                 "",
             ]
         )
+    original = current
 
     timestamp = local_obsidian_timestamp(ts)
     line = f"- {timestamp} {note[:180]}"
@@ -1097,6 +1195,10 @@ def append_personality_learning(note: str, ts: str | None = None) -> None:
         if not current.endswith("\n"):
             current += "\n"
         current += line + "\n"
+    compacted = _trim_section_bullets(current, "## Evolving Traits", OOGWAY_BRAIN_MEMORY_MAX_PROFILE_LINES)
+    if compacted != current:
+        current = compacted
+    if current != original:
         path.write_text(current, encoding="utf-8")
 
 
@@ -1111,6 +1213,10 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     trigger = str(item.get("trigger") or "periodic")
     note_text = str(item.get("note") or "")
     if not note_text:
+        return
+
+    if is_duplicate_memory_event(topic, note_text):
+        brain_log("memory.write.skipped_duplicate", topic=topic, trigger=trigger)
         return
 
     if trigger == "chat-message" or topic == "chat":
@@ -1151,6 +1257,9 @@ def write_obsidian_memory_note(item: dict[str, Any]) -> None:
     note_path.write_text(body, encoding="utf-8")
     append_to_obsidian_topic(f"Topic - {topic.title()}", note_title, note_text)
     append_to_daily_journal(date_prefix, note_title, topic, note_text, time_str)
+    deleted_count = prune_generated_memory_notes()
+    if deleted_count > 0:
+        brain_log("memory.prune.generated_notes", deleted=deleted_count, kept=OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES)
 
 
 def read_action_log() -> list[dict[str, Any]]:
@@ -1315,6 +1424,8 @@ async def broadcast_chat(item: dict[str, Any]) -> None:
         except Exception:
             dead.add(client)
     CHAT_CLIENTS.difference_update(dead)
+    for client in dead:
+        CHAT_CLIENT_NAMES.pop(client, None)
 
 
 async def broadcast_chat_snapshot() -> None:
@@ -1323,13 +1434,17 @@ async def broadcast_chat_snapshot() -> None:
 
 async def broadcast_viewer_count() -> None:
     count = len(CHAT_CLIENTS)
+    names = sorted({name for name in CHAT_CLIENT_NAMES.values() if name})
     dead: set[WebSocket] = set()
     for client in list(CHAT_CLIENTS):
         try:
             await client.send_json({"kind": "viewer_count", "count": count})
+            await client.send_json({"kind": "viewer_presence", "count": count, "names": names})
         except Exception:
             dead.add(client)
     CHAT_CLIENTS.difference_update(dead)
+    for client in dead:
+        CHAT_CLIENT_NAMES.pop(client, None)
 
 
 async def broadcast_oogway_typing(active: bool) -> None:
@@ -1759,6 +1874,47 @@ def _select_single_snapshot_image(snapshots: list[dict[str, str]], hint_text: st
     return ""
 
 
+def _select_snapshot_images(snapshots: list[dict[str, str]], hint_text: str = "", max_images: int = 2) -> list[str]:
+    """Pick up to max_images snapshots, preferring water/food hints and camera diversity."""
+    hint = (hint_text or "").lower()
+    wants_water = any(token in hint for token in ["water", "drink", "drinking", "bowl", "hydrate"])
+    wants_food = any(token in hint for token in ["food", "feed", "feeding", "eat", "eating", "kale", "lettuce"])
+    wants_hut = any(token in hint for token in ["hut", "hide", "inside", "sleep", "rest", "fallen"])
+
+    def _score(snapshot: dict[str, str]) -> int:
+        meta = " ".join([
+            str(snapshot.get("key", "")),
+            str(snapshot.get("label", "")),
+            str(snapshot.get("url", "")),
+        ]).lower()
+        score = 0
+        if wants_water and "water" in meta:
+            score += 12
+        if wants_food and "food" in meta:
+            score += 10
+        if wants_hut and any(token in meta for token in ["hut", "primary", "4k"]):
+            score += 8
+        if "primary" in meta:
+            score += 2
+        return score
+
+    selected: list[str] = []
+    seen_keys: set[str] = set()
+    for snapshot in sorted(snapshots, key=_score, reverse=True):
+        key = str(snapshot.get("key", ""))
+        if key and key in seen_keys:
+            continue
+        encoded = _extract_data_url_base64(snapshot.get("dataUrl", ""))
+        if not encoded:
+            continue
+        selected.append(encoded)
+        if key:
+            seen_keys.add(key)
+        if len(selected) >= max(1, max_images):
+            break
+    return selected
+
+
 def _parse_json_from_text(content: str) -> dict[str, Any] | None:
     text = str(content or "")
     start = text.find("{")
@@ -1907,8 +2063,7 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]
         brain_log("vision.care.skip.no_model", level="warning")
         return _LEVEL_DEFAULTS
 
-    selected_image = _select_single_snapshot_image(snapshots, "food water bowls")
-    images = [selected_image] if selected_image else []
+    images = _select_snapshot_images(snapshots, "food water bowls", max_images=2)
     if not images:
         brain_log("vision.care.skip.no_images", level="warning")
         return _LEVEL_DEFAULTS
@@ -1990,8 +2145,7 @@ async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str,
         brain_log("vision.behavior.skip.no_model", level="warning")
         return defaults
 
-    selected_image = _select_single_snapshot_image(snapshots, "tortoise eating drinking")
-    images = [selected_image] if selected_image else []
+    images = _select_snapshot_images(snapshots, "tortoise eating drinking water food", max_images=2)
     if not images:
         brain_log("vision.behavior.skip.no_images", level="warning")
         return defaults
@@ -2079,8 +2233,7 @@ async def evaluate_behavior_state(snapshots: list[dict[str, str]]) -> dict[str, 
     if not snapshots or not OOGWAY_OLLAMA_VISION_MODEL:
         return defaults
 
-    selected_image = _select_single_snapshot_image(snapshots, "tortoise in hut fallen over")
-    images = [selected_image] if selected_image else []
+    images = _select_snapshot_images(snapshots, "tortoise in hut fallen over water bowl", max_images=2)
     if not images:
         return defaults
 
@@ -2864,6 +3017,9 @@ async def startup() -> None:
     ensure_list_file(ACTION_LOG_PATH)
     ensure_list_file(CHAT_LOG_PATH)
     ensure_obsidian_memory_dir()
+    deleted_count = prune_generated_memory_notes()
+    if deleted_count > 0:
+        brain_log("memory.prune.startup", deleted=deleted_count, kept=OOGWAY_BRAIN_MEMORY_MAX_EVENT_NOTES)
     kept, changed = prune_chat_entries(read_list_file(CHAT_LOG_PATH, cap=200))
     if changed:
         write_list_file(CHAT_LOG_PATH, kept, cap=200)
@@ -3182,6 +3338,7 @@ async def chat_ws(
     connection_name_color = usernameColor[:12] if usernameColor.startswith("#") else "#a3e635"
     await ws.accept()
     CHAT_CLIENTS.add(ws)
+    CHAT_CLIENT_NAMES[ws] = safe_name
     await broadcast_viewer_count()
 
     for msg in read_chat_log():
@@ -3245,6 +3402,7 @@ async def chat_ws(
                     await enqueue_brain_response(trigger="chat", source_message=msg)
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)
+        CHAT_CLIENT_NAMES.pop(ws, None)
         await broadcast_viewer_count()
 
 

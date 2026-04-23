@@ -577,6 +577,56 @@
       color: #94a3b8;
       background: rgba(148, 163, 184, 0.08);
       user-select: none;
+      cursor: pointer;
+      transition: background 0.18s ease;
+    }
+
+    .viewer-chip:hover {
+      background: rgba(148, 163, 184, 0.16);
+    }
+
+    .viewer-popover {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 66;
+      width: min(86vw, 260px);
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 10px;
+      background: linear-gradient(145deg, rgba(29, 36, 47, 0.96), rgba(17, 24, 39, 0.98));
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.36);
+      padding: 10px;
+      display: none;
+    }
+
+    .viewer-popover.show {
+      display: block;
+    }
+
+    .viewer-popover-title {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    .viewer-list {
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .viewer-list-item {
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      color: #e2e8f0;
+      background: rgba(51, 65, 85, 0.28);
     }
 
     .admin-delete-btn {
@@ -689,7 +739,13 @@
                 <div id="report-banner" class="report-banner"></div>
               </div>
               <span class="live-chip"><span class="live-pulse"></span> LIVE</span>
-              <span id="viewer-count-chip" class="viewer-chip">&#128065; 1</span>
+              <div class="relative">
+                <span id="viewer-count-chip" class="viewer-chip" title="View active viewer names">&#128065; 1</span>
+                <div id="viewer-popover" class="viewer-popover">
+                  <div class="viewer-popover-title">Active Viewers</div>
+                  <div id="viewer-list" class="viewer-list"></div>
+                </div>
+              </div>
               <button id="video-settings-btn" class="cog-btn" title="Video settings">&#9881;</button>
             </div>
           </div>
@@ -894,8 +950,8 @@
       ];
 
       var state = {
-        username: sessionStorage.getItem("oogworld_username") || "",
-        badgeColor: sessionStorage.getItem("oogworld_badge_color") || "#4caf50",
+        username: localStorage.getItem("oogworld_username") || sessionStorage.getItem("oogworld_username") || "",
+        badgeColor: localStorage.getItem("oogworld_badge_color") || sessionStorage.getItem("oogworld_badge_color") || "#4caf50",
         adminToken: sessionStorage.getItem("oogworld_admin_token") || "",
         streams: {},
         streamOptions: [],
@@ -908,6 +964,8 @@
           food: { active: false, reporter: "", updatedAt: "" },
           water: { active: false, reporter: "", updatedAt: "" },
         },
+        viewerNames: [],
+        viewerPopoverOpen: false,
       };
 
       var videoPrefs = JSON.parse(localStorage.getItem("oogworld_video_prefs") || "{}");
@@ -923,6 +981,8 @@
         usernameBadge: document.getElementById("username-badge"),
         hlsVideo: document.getElementById("hls-video"),
         viewerCountChip: document.getElementById("viewer-count-chip"),
+        viewerPopover: document.getElementById("viewer-popover"),
+        viewerList: document.getElementById("viewer-list"),
         currentStreamLabel: document.getElementById("current-stream-label"),
         reportBanner: document.getElementById("report-banner"),
         nightSky: document.getElementById("night-sky"),
@@ -1056,6 +1116,27 @@
         el.usernameBadge.style.background = state.badgeColor;
         el.usernameBadge.style.color = isLightColor(state.badgeColor) ? "#050505" : "#ffffff";
         el.usernameBadge.style.boxShadow = "0 0 0 2px rgba(0,0,0,.35), 0 4px 12px " + state.badgeColor + "66";
+      }
+
+      function renderViewerPresence() {
+        if (!el.viewerList) return;
+        var names = Array.isArray(state.viewerNames) ? state.viewerNames.slice(0, 100) : [];
+        if (!names.length) {
+          el.viewerList.innerHTML = "<div class=\"text-xs text-slate-400\">No active viewers listed yet.</div>";
+          return;
+        }
+        el.viewerList.innerHTML = names.map(function (name) {
+          return "<div class=\"viewer-list-item\">" + escHtml(name) + "</div>";
+        }).join("");
+      }
+
+      function setViewerPopover(open) {
+        state.viewerPopoverOpen = !!open;
+        if (!el.viewerPopover) return;
+        el.viewerPopover.classList.toggle("show", state.viewerPopoverOpen);
+        if (state.viewerPopoverOpen) {
+          renderViewerPresence();
+        }
       }
 
       function appendChatMessage(msg) {
@@ -1387,6 +1468,12 @@
             var msg = JSON.parse(evt.data);
             if (msg.kind === "viewer_count") {
               if (el.viewerCountChip) el.viewerCountChip.textContent = "\uD83D\uDC41 " + msg.count;
+              return;
+            }
+            if (msg.kind === "viewer_presence") {
+              state.viewerNames = Array.isArray(msg.names) ? msg.names : [];
+              if (el.viewerCountChip) el.viewerCountChip.textContent = "\uD83D\uDC41 " + (msg.count || state.viewerNames.length || 0);
+              if (state.viewerPopoverOpen) renderViewerPresence();
               return;
             }
             if (msg.kind === "chat_snapshot") {
@@ -1739,6 +1826,8 @@
       function saveChatSettings() {
         state.username = (el.chatNameInput.value || "").trim().replace(/[<>]/g, "").slice(0, 24) || "Anonymous";
 
+        localStorage.setItem("oogworld_username", state.username);
+        localStorage.setItem("oogworld_badge_color", state.badgeColor);
         sessionStorage.setItem("oogworld_username", state.username);
         sessionStorage.setItem("oogworld_badge_color", state.badgeColor);
         sessionStorage.removeItem("oogworld_chat_text_color");
@@ -1781,6 +1870,8 @@
         var input = (el.usernameInput.value || "").trim();
         if (!input) return;
         state.username = input.replace(/[<>]/g, "").slice(0, 24) || "Anonymous";
+        localStorage.setItem("oogworld_username", state.username);
+        localStorage.setItem("oogworld_badge_color", state.badgeColor);
         sessionStorage.setItem("oogworld_username", state.username);
         sessionStorage.setItem("oogworld_badge_color", state.badgeColor);
         el.loginOverlay.classList.add("hidden");
@@ -1825,6 +1916,9 @@
       });
 
       el.reportIconBtn.addEventListener("click", openReportMini);
+      el.viewerCountChip.addEventListener("click", function () {
+        setViewerPopover(!state.viewerPopoverOpen);
+      });
       el.reportMiniClose.addEventListener("click", closeReportMini);
       el.reportFoodBtn.addEventListener("click", function () {
         submitReport("food");
@@ -1838,6 +1932,12 @@
         var onButton = e.target === el.reportIconBtn || el.reportIconBtn.contains(e.target);
         if (!inModal && !onButton) {
           closeReportMini();
+        }
+
+        var inViewerPopover = el.viewerPopover && el.viewerPopover.contains(e.target);
+        var onViewerChip = e.target === el.viewerCountChip || (el.viewerCountChip && el.viewerCountChip.contains(e.target));
+        if (!inViewerPopover && !onViewerChip) {
+          setViewerPopover(false);
         }
       });
 
