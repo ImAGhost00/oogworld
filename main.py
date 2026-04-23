@@ -1440,16 +1440,16 @@ _DRINKING_REACTIONS: list[str] = [
 ]
 
 _SLEEP_REACTIONS: list[str] = [
-    "zzz...",
-    "*zzz*",
-    "zzzz...",
-    "zzz mmm kale zzzz",
-    "mmm... warm rock... zzz",
-    "zzz... lettuce... zzz",
-    "z... z... basking... zzzz",
-    "*snore* ...dandelion... *snore*",
-    "zzz mmm strawberry zzz",
-    "...zzzz...",
+    "let me sleep.",
+    "im sleeping. let me sleep.",
+    "no. bedtime. let me sleep.",
+    "go away. tortoise is sleeping.",
+    "zzz... stop poking me.",
+    "its dark. im asleep. let me sleep.",
+    "hiss... just kidding. let me sleep.",
+    "mmm kale dream... let me sleep.",
+    "bedtime means quiet time.",
+    "not now. shell closed. let me sleep.",
 ]
 
 
@@ -1750,9 +1750,11 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
                 )
                 append_chat_log(msg)
                 await broadcast_chat(msg)
+            elif trigger == "manual":
+                pass  # manual trigger bypasses sleep gate — fall through to normal reply
             else:
                 brain_log("brain.reply.skip.asleep", trigger=trigger, level="debug")
-            return
+                return
 
         if trigger == "periodic" and LAST_BRAIN_SPOKE_AT:
             elapsed = (now_utc() - LAST_BRAIN_SPOKE_AT).total_seconds()
@@ -2143,6 +2145,46 @@ def brain_status() -> dict[str, Any]:
         "memoryItems": len(list_obsidian_memory_notes()),
         "lastSpokeAt": LAST_BRAIN_SPOKE_AT.isoformat() if LAST_BRAIN_SPOKE_AT else "",
     }
+
+
+@app.post("/api/brain/ping")
+async def brain_ping(request: Request) -> dict[str, Any]:
+    """Admin-only: send a real Ollama chat request and return the raw reply for diagnostics."""
+    require_admin(request)
+    if not is_brain_configured():
+        return {"ok": False, "error": "Brain not configured (missing OOGWAY_OLLAMA_BASE or model)"}
+
+    test_prompt = "Say hello in one short sentence as Oogway the tortoise."
+    try:
+        payload = {
+            "model": OOGWAY_OLLAMA_MODEL,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": OOGWAY_BRAIN_PERSONALITY},
+                {"role": "user", "content": test_prompt},
+            ],
+            "options": {"temperature": 0.7, "num_predict": 60},
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+        if resp.status_code >= 400:
+            return {"ok": False, "error": f"Ollama returned HTTP {resp.status_code}", "body": resp.text[:300]}
+        reply = resp.json().get("message", {}).get("content", "").strip()
+        return {"ok": True, "reply": reply, "model": OOGWAY_OLLAMA_MODEL, "ollamaBase": OOGWAY_OLLAMA_BASE}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "ollamaBase": OOGWAY_OLLAMA_BASE}
+
+
+@app.post("/api/brain/trigger")
+async def brain_trigger(request: Request) -> dict[str, Any]:
+    """Admin-only: immediately fire the brain loop (mention trigger) bypassing sleep/interval guards."""
+    require_admin(request)
+    if not OOGWAY_BRAIN_ENABLED:
+        return {"ok": False, "error": "OOGWAY_BRAIN_ENABLED is false — enable it in Admin > AI Settings"}
+    if not is_brain_configured():
+        return {"ok": False, "error": "Brain not configured (missing model or Ollama base URL)"}
+    asyncio.create_task(run_oogway_brain(trigger="manual"))
+    return {"ok": True, "message": "Brain triggered — check chat in a moment"}
 
 
 @app.post("/api/admin/login")
