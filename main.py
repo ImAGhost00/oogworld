@@ -3240,6 +3240,13 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def get_local_tz() -> ZoneInfo:
+    try:
+        return ZoneInfo(TZ)
+    except Exception:
+        return ZoneInfo("America/New_York")
+
+
 def local_obsidian_iso(ts: Any | None = None) -> str:
     local_tz = get_local_tz()
     if isinstance(ts, datetime):
