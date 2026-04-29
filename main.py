@@ -22,7 +22,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.2"
 BASE_DIR = Path(__file__).parent
 
 
@@ -74,6 +74,12 @@ OOGWAY_BRAIN_PERSONALITY = os.getenv(
 )
 OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(os.getenv("OOGWAY_BRAIN_INTERVAL_SECONDS", "120")))
 OOGWAY_BRAIN_MENTION_TRIGGER = os.getenv("OOGWAY_BRAIN_MENTION_TRIGGER", "@oogway")
+OOGWAY_BRAIN_AUTO_CHAT_ENABLED = os.getenv("OOGWAY_BRAIN_AUTO_CHAT_ENABLED", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 OOGWAY_BRAIN_CAMERA_KEY = os.getenv("OOGWAY_BRAIN_CAMERA_KEY", "both")
 OOGWAY_BRAIN_MOVEMENT_WINDOW_SECONDS = max(
     60,
@@ -158,13 +164,14 @@ _BRAIN_CONFIG_KEYS = {
     "personality": ("OOGWAY_BRAIN_PERSONALITY", str),
     "intervalSeconds": ("OOGWAY_BRAIN_INTERVAL_SECONDS", int),
     "mentionTrigger": ("OOGWAY_BRAIN_MENTION_TRIGGER", str),
+    "autoChatEnabled": ("OOGWAY_BRAIN_AUTO_CHAT_ENABLED", bool),
 }
 
 def _load_brain_config() -> None:
     """Load saved brain config from disk, overriding module-level globals."""
     global OOGWAY_BRAIN_ENABLED, OOGWAY_OLLAMA_MODEL, OOGWAY_OLLAMA_VISION_MODEL
     global OOGWAY_OLLAMA_BASE, OOGWAY_BRAIN_PERSONALITY
-    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER
+    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER, OOGWAY_BRAIN_AUTO_CHAT_ENABLED
     if not BRAIN_CONFIG_PATH.exists():
         return
     with suppress(Exception):
@@ -183,6 +190,8 @@ def _load_brain_config() -> None:
             OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(raw["intervalSeconds"]))
         if raw.get("mentionTrigger"):
             OOGWAY_BRAIN_MENTION_TRIGGER = str(raw["mentionTrigger"]).strip()
+        if "autoChatEnabled" in raw:
+            OOGWAY_BRAIN_AUTO_CHAT_ENABLED = bool(raw["autoChatEnabled"])
 
 def _save_brain_config() -> None:
     """Persist current brain config globals to disk."""
@@ -196,6 +205,7 @@ def _save_brain_config() -> None:
             "personality": OOGWAY_BRAIN_PERSONALITY,
             "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
             "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+            "autoChatEnabled": OOGWAY_BRAIN_AUTO_CHAT_ENABLED,
         }
         BRAIN_CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
@@ -333,6 +343,9 @@ LAST_OBSERVED_SUMMARY: str = ""
 LAST_OBSERVED_TOPIC: str = "routine"
 LAST_OBSERVED_LOCATION: str = "unknown"
 LAST_OBSERVED_ACTIVITY: str = "unknown"
+LAST_VISUAL_VALIDATED_AT: datetime | None = None
+LAST_VISUAL_VALIDATION_LINES: list[str] = []
+LAST_CAMERA_VISUAL_STATES: dict[str, dict[str, Any]] = {}
 DAYLIGHT_CACHE: dict[str, Any] = {
     "sunriseUtc": "",
     "sunsetUtc": "",
@@ -870,7 +883,9 @@ def recent_daily_activity_lines(limit: int = 6) -> list[str]:
 
 
 def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) -> tuple[str, str, str, list[str]]:
-    if behavior.get("drinking") or behavior.get("near_water"):
+    if not state.get("tortoise_visible"):
+        location = "not clearly visible"
+    elif behavior.get("drinking") or behavior.get("near_water"):
         location = "at the water bowl"
     elif behavior.get("eating") or behavior.get("near_food"):
         location = "at the food dish"
@@ -882,7 +897,10 @@ def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) 
     activity = "resting"
     links: list[str] = []
 
-    if state.get("fallen_over"):
+    if not state.get("tortoise_visible"):
+        activity = "not clearly visible"
+        topic = "routine"
+    elif state.get("fallen_over"):
         activity = "fallen over"
         topic = "fallen"
         links.append("[[Topic - Health]]")
@@ -894,6 +912,14 @@ def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) 
         activity = "eating from the food dish"
         topic = "feeding"
         links.append("[[Topic - Feeding]]")
+    elif behavior.get("basking"):
+        activity = "basking under the heatlamp"
+        topic = "basking"
+        links.append("[[Topic - Behavior]]")
+    elif behavior.get("sleeping"):
+        activity = "sleeping quietly"
+        topic = "sleep"
+        links.append("[[Topic - Sleep]]")
     elif state.get("in_hut"):
         activity = "resting quietly in the hut"
         topic = "sleep"
@@ -908,6 +934,262 @@ def summarize_observed_state(state: dict[str, bool], behavior: dict[str, bool]) 
 
     summary = f"Oogway is {location} and {activity}."
     return summary, topic, location, list(dict.fromkeys(links))
+
+
+def _visual_flag_word(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def describe_camera_visual_state(camera_state: dict[str, Any]) -> str:
+    label = str(camera_state.get("label", "camera"))
+    location = str(camera_state.get("location", "unknown"))
+    activity = str(camera_state.get("activity", "unknown"))
+    visible = _visual_flag_word(bool(camera_state.get("tortoise_visible", False)))
+    lit = _visual_flag_word(bool(camera_state.get("scene_lit", False)))
+    return (
+        f"{label}: visible={visible}, lit={lit}, location={location}, activity={activity}, "
+        f"basking={_visual_flag_word(bool(camera_state.get('basking', False)))}, "
+        f"sleeping={_visual_flag_word(bool(camera_state.get('sleeping', False)))}, "
+        f"eating={_visual_flag_word(bool(camera_state.get('eating', False)))}, "
+        f"drinking={_visual_flag_word(bool(camera_state.get('drinking', False)))}"
+    )
+
+
+async def validate_visual_observation(
+    snapshots: list[dict[str, str]],
+    reason: str = "vision-validation",
+    record_memory: bool = False,
+    record_activity: bool = False,
+) -> dict[str, Any]:
+    global LAST_ACTIVITY_LOG_AT, LAST_OBSERVED_SUMMARY, LAST_OBSERVED_TOPIC
+    global LAST_OBSERVED_LOCATION, LAST_OBSERVED_ACTIVITY
+    global LAST_VISUAL_VALIDATED_AT, LAST_VISUAL_VALIDATION_LINES, LAST_CAMERA_VISUAL_STATES
+
+    default_state = {
+        "scene_lit": False,
+        "tortoise_visible": False,
+        "in_hut": False,
+        "near_hut": False,
+        "near_water": False,
+        "near_food": False,
+        "fallen_over": False,
+    }
+    default_behavior = {
+        "tortoise_visible": False,
+        "near_food": False,
+        "near_water": False,
+        "eating": False,
+        "drinking": False,
+        "basking": False,
+        "sleeping": False,
+    }
+    result: dict[str, Any] = {
+        "state": dict(default_state),
+        "behavior": dict(default_behavior),
+        "summary": LAST_OBSERVED_SUMMARY or "Oogway is not clearly visible right now.",
+        "topic": LAST_OBSERVED_TOPIC,
+        "location": LAST_OBSERVED_LOCATION,
+        "activity": LAST_OBSERVED_ACTIVITY,
+        "links": [],
+        "cameraStates": [],
+        "cameraLines": list(LAST_VISUAL_VALIDATION_LINES),
+    }
+    if not snapshots or not OOGWAY_OLLAMA_VISION_MODEL:
+        return result
+
+    selected = [snapshot for snapshot in snapshots if _extract_data_url_base64(str(snapshot.get("dataUrl", "")))]
+    if not selected:
+        return result
+
+    async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
+        camera_states: list[dict[str, Any]] = []
+        for snapshot in selected:
+            encoded = _extract_data_url_base64(str(snapshot.get("dataUrl", "")))
+            if not encoded:
+                continue
+            label = str(snapshot.get("label", "camera")).strip() or "camera"
+            key = str(snapshot.get("key", "")).strip() or label.lower().replace(" ", "-")
+            payload = {
+                "model": OOGWAY_OLLAMA_VISION_MODEL,
+                "stream": False,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You analyze one terrarium camera frame at a time. "
+                            "Be conservative, literal, and return only what is clearly visible."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Camera label: {label}. Camera key: {key}. "
+                            "Return ONLY strict JSON with keys: "
+                            '{"scene_lit": boolean, "tortoise_visible": boolean, "in_hut": boolean, "near_hut": boolean, '
+                            '"near_water": boolean, "near_food": boolean, "fallen_over": boolean, "eating": boolean, '
+                            '"drinking": boolean, "basking": boolean, "sleeping": boolean}. '
+                            "Definitions: basking=true only if Oogway is visibly out under the open warm/light area and resting there. "
+                            "sleeping=true only if Oogway clearly looks asleep/resting, usually tucked in the hut or motionless in a resting posture. "
+                            "If scene is dark or unclear, set scene_lit=false and all other fields false. If uncertain, return false."
+                        ),
+                        "images": [encoded],
+                    },
+                ],
+                "options": {"temperature": 0.0, "num_predict": 120},
+            }
+            try:
+                resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+                if resp.status_code >= 400:
+                    brain_log("vision.validate.http_error", level="error", status=resp.status_code, camera=label)
+                    continue
+                parsed = _parse_json_from_text(str(resp.json().get("message", {}).get("content", "")))
+                if not parsed:
+                    brain_log("vision.validate.parse_error", level="warning", camera=label)
+                    continue
+            except Exception as exc:
+                brain_log("vision.validate.exception", level="error", camera=label, error=str(exc))
+                continue
+
+            camera_state = {
+                "key": key,
+                "label": label,
+                "scene_lit": bool(parsed.get("scene_lit", False)),
+                "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
+                "in_hut": bool(parsed.get("in_hut", False)),
+                "near_hut": bool(parsed.get("near_hut", False)),
+                "near_water": bool(parsed.get("near_water", False)),
+                "near_food": bool(parsed.get("near_food", False)),
+                "fallen_over": bool(parsed.get("fallen_over", False)),
+                "eating": bool(parsed.get("eating", False)),
+                "drinking": bool(parsed.get("drinking", False)),
+                "basking": bool(parsed.get("basking", False)),
+                "sleeping": bool(parsed.get("sleeping", False)),
+            }
+            if not camera_state["scene_lit"] or not camera_state["tortoise_visible"]:
+                for field in ["in_hut", "near_hut", "near_water", "near_food", "fallen_over", "eating", "drinking", "basking", "sleeping"]:
+                    camera_state[field] = False
+
+            behavior_for_summary = {
+                "tortoise_visible": camera_state["tortoise_visible"],
+                "near_food": camera_state["near_food"],
+                "near_water": camera_state["near_water"],
+                "eating": camera_state["eating"],
+                "drinking": camera_state["drinking"],
+                "basking": camera_state["basking"],
+                "sleeping": camera_state["sleeping"],
+            }
+            state_for_summary = {
+                "scene_lit": camera_state["scene_lit"],
+                "tortoise_visible": camera_state["tortoise_visible"],
+                "in_hut": camera_state["in_hut"],
+                "near_hut": camera_state["near_hut"],
+                "near_water": camera_state["near_water"],
+                "near_food": camera_state["near_food"],
+                "fallen_over": camera_state["fallen_over"],
+            }
+            camera_summary, _topic, location, _links = summarize_observed_state(state_for_summary, behavior_for_summary)
+            activity = camera_summary.removeprefix(f"Oogway is {location} and ").rstrip(".") if camera_summary.startswith(f"Oogway is {location} and ") else camera_summary
+            camera_state["location"] = location
+            camera_state["activity"] = activity
+            camera_states.append(camera_state)
+
+    if not camera_states:
+        return result
+
+    state = {
+        "scene_lit": any(item["scene_lit"] for item in camera_states),
+        "tortoise_visible": any(item["tortoise_visible"] for item in camera_states),
+        "in_hut": any(item["in_hut"] for item in camera_states),
+        "near_hut": any(item["near_hut"] for item in camera_states),
+        "near_water": any(item["near_water"] for item in camera_states),
+        "near_food": any(item["near_food"] for item in camera_states),
+        "fallen_over": any(item["fallen_over"] for item in camera_states),
+    }
+    behavior = {
+        "tortoise_visible": state["tortoise_visible"],
+        "near_food": any(item["near_food"] for item in camera_states),
+        "near_water": any(item["near_water"] for item in camera_states),
+        "eating": any(item["eating"] for item in camera_states),
+        "drinking": any(item["drinking"] for item in camera_states),
+        "basking": any(item["basking"] for item in camera_states),
+        "sleeping": any(item["sleeping"] for item in camera_states),
+    }
+
+    if behavior["near_food"] or behavior["near_water"] or behavior["eating"] or behavior["drinking"]:
+        state["in_hut"] = False
+        behavior["basking"] = False
+        behavior["sleeping"] = False
+    if state["in_hut"]:
+        behavior["basking"] = False
+
+    summary, topic, location, links = summarize_observed_state(state, behavior)
+    activity = summary.removeprefix(f"Oogway is {location} and ").rstrip(".") if summary.startswith(f"Oogway is {location} and ") else summary
+    camera_lines = [describe_camera_visual_state(item) for item in camera_states]
+    result = {
+        "state": state,
+        "behavior": behavior,
+        "summary": summary,
+        "topic": topic,
+        "location": location,
+        "activity": activity,
+        "links": links,
+        "cameraStates": camera_states,
+        "cameraLines": camera_lines,
+    }
+
+    previous_summary = LAST_OBSERVED_SUMMARY
+    LAST_VISUAL_VALIDATED_AT = now_utc()
+    LAST_VISUAL_VALIDATION_LINES = list(camera_lines)
+    if state.get("tortoise_visible"):
+        LAST_OBSERVED_SUMMARY = summary
+        LAST_OBSERVED_TOPIC = topic
+        LAST_OBSERVED_LOCATION = location
+        LAST_OBSERVED_ACTIVITY = activity
+
+    if record_memory:
+        now_iso = now_utc().isoformat()
+        for camera_state in camera_states:
+            compact_state = {
+                key: camera_state[key]
+                for key in [
+                    "scene_lit",
+                    "tortoise_visible",
+                    "in_hut",
+                    "near_hut",
+                    "near_water",
+                    "near_food",
+                    "fallen_over",
+                    "eating",
+                    "drinking",
+                    "basking",
+                    "sleeping",
+                    "location",
+                    "activity",
+                ]
+            }
+            previous_state = LAST_CAMERA_VISUAL_STATES.get(camera_state["key"])
+            if compact_state != previous_state:
+                remember_memory_event(
+                    topic=f"visual-camera-{camera_state['key']}",
+                    note=describe_camera_visual_state(camera_state),
+                    trigger=reason,
+                    ts=now_iso,
+                )
+            LAST_CAMERA_VISUAL_STATES[camera_state["key"]] = compact_state
+
+        if record_activity:
+            observation_due = (
+                LAST_ACTIVITY_LOG_AT is None
+                or (now_utc() - LAST_ACTIVITY_LOG_AT).total_seconds() >= OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS
+                or summary != previous_summary
+            )
+            if observation_due and state.get("tortoise_visible"):
+                append_to_daily_activity_log(now_iso, topic, summary, links=links)
+                remember_memory_event(topic=topic, note=summary, trigger=reason, ts=now_iso)
+                LAST_ACTIVITY_LOG_AT = now_utc()
+
+    brain_log("vision.validate.ok", summary=summary, cameras=len(camera_states), reason=reason)
+    return result
 
 
 def append_to_daily_chat_log(ts: str, note_text: str) -> None:
@@ -1721,15 +2003,9 @@ async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
     if not targets:
         return []
 
-    captures = await asyncio.gather(
-        *(capture_stream_snapshot_data_url(target["hlsUrl"]) for target in targets),
-        return_exceptions=True,
-    )
-
     snapshots: list[dict[str, str]] = []
-    for target, capture_result in zip(targets, captures):
-        if isinstance(capture_result, Exception):
-            continue
+    for target in targets:
+        capture_result = await capture_stream_snapshot_data_url(target["hlsUrl"])
         if capture_result:
             snapshots.append(
                 {
@@ -1741,11 +2017,22 @@ async def capture_brain_snapshots_data_urls() -> list[dict[str, str]]:
     return snapshots
 
 
-def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sleepy_mode: bool = False) -> str:
+def build_oogway_prompt(
+    trigger: str,
+    source_message: dict[str, Any] | None,
+    sleepy_mode: bool = False,
+    visual_validation: dict[str, Any] | None = None,
+) -> str:
     recents = read_chat_log()[-OOGWAY_BRAIN_CONTEXT_CHAT_CAP:]
     memory = read_recent_obsidian_memories(limit=14)
     activity_lines = recent_daily_activity_lines(limit=6)
-    current_state_line = LAST_OBSERVED_SUMMARY or (activity_lines[-1] if activity_lines else "")
+    current_state_line = (
+        str((visual_validation or {}).get("summary", "")).strip()
+        or LAST_OBSERVED_SUMMARY
+        or (activity_lines[-1] if activity_lines else "")
+    )
+    camera_validation_lines = list((visual_validation or {}).get("cameraLines") or LAST_VISUAL_VALIDATION_LINES)
+    validated_at_text = LAST_VISUAL_VALIDATED_AT.isoformat() if LAST_VISUAL_VALIDATED_AT else ""
     recent_lines = [
         f"[{msg.get('ts', '')}] {msg.get('username', 'Anonymous')}: {msg.get('text', '')}"
         for msg in recents
@@ -1807,9 +2094,14 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             mention_line,
             f"Camera coverage this turn: {camera_labels}",
             f"Current observed state: {current_state_line or '(unknown right now)'}",
+            f"Latest visual validation time: {validated_at_text or '(not validated yet)'}",
+            "",
+            "Validated per-camera observations:",
+            "\n".join(camera_validation_lines[-4:]) or "(no validated camera observations yet)",
             "",
             "Vision priorities:",
             "- Watch for location and routine: in hut, out exploring, basking, resting, drinking, eating.",
+            "- Validate where Oogway is and what he is doing against the latest per-camera observations before answering.",
             "- Notice day-to-day activity patterns before fixating on food or water.",
             "- Only focus on food/water when there is a visible care event, empty bowl, or explicit user question.",
             "- If uncertain, say so briefly instead of making up details.",
@@ -1832,6 +2124,7 @@ def build_oogway_prompt(trigger: str, source_message: dict[str, Any] | None, sle
             "",
             "Rules: keep under 240 chars, no roleplay markers, no markdown.",
             "If the user asked a question, answer the question directly before any terrarium status update.",
+            "If the user asks what Oogway is doing or where he is, answer from the latest validated camera state first.",
             "Do not repeat the same sentence from your last few replies unless the user explicitly asks you to repeat it.",
             "Do not default to kale, feeding, or care reminders unless the current context genuinely supports it.",
         ]
@@ -2086,44 +2379,54 @@ async def evaluate_care_needs(snapshots: list[dict[str, str]]) -> dict[str, Any]
     )
 
     try:
-        payload = {
-            "model": OOGWAY_OLLAMA_VISION_MODEL,
-            "stream": False,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": task_prompt, "images": images},
-            ],
-            "options": {"temperature": 0.1, "num_predict": 60},
-        }
+        level_rank = {"empty": 0, "low": 1, "medium": 2, "full": 3}
+        food_candidates: list[str] = []
+        water_candidates: list[str] = []
+
         async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
-            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
-        if resp.status_code >= 400:
-            body_excerpt = ""
-            with suppress(Exception):
-                body_excerpt = resp.text[:280]
-            brain_log("vision.care.http_error", level="error", status=resp.status_code, body=body_excerpt)
-            return _LEVEL_DEFAULTS
-        content = resp.json().get("message", {}).get("content", "")
-        parsed = _parse_json_from_text(str(content))
-        if not parsed:
-            brain_log("vision.care.parse_error", level="warning", content=str(content)[:280])
+            for image in images:
+                payload = {
+                    "model": OOGWAY_OLLAMA_VISION_MODEL,
+                    "stream": False,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": task_prompt, "images": [image]},
+                    ],
+                    "options": {"temperature": 0.1, "num_predict": 60},
+                }
+                resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+                if resp.status_code >= 400:
+                    body_excerpt = ""
+                    with suppress(Exception):
+                        body_excerpt = resp.text[:280]
+                    brain_log("vision.care.http_error", level="error", status=resp.status_code, body=body_excerpt)
+                    continue
+
+                content = resp.json().get("message", {}).get("content", "")
+                parsed = _parse_json_from_text(str(content))
+                if not parsed:
+                    brain_log("vision.care.parse_error", level="warning", content=str(content)[:280])
+                    continue
+
+                food_level = str(parsed.get("food_level", "medium")).lower()
+                water_level = str(parsed.get("water_level", "medium")).lower()
+                if food_level in level_rank:
+                    food_candidates.append(food_level)
+                if water_level in level_rank:
+                    water_candidates.append(water_level)
+
+        if not food_candidates and not water_candidates:
             return _LEVEL_DEFAULTS
 
-        _VALID_LEVELS = {"empty", "low", "medium", "full"}
-        food_level = str(parsed.get("food_level", "medium")).lower()
-        water_level = str(parsed.get("water_level", "medium")).lower()
-        if food_level not in _VALID_LEVELS:
-            food_level = "medium"
-        if water_level not in _VALID_LEVELS:
-            water_level = "medium"
-
+        food_level = min(food_candidates or ["medium"], key=lambda value: level_rank[value])
+        water_level = min(water_candidates or ["medium"], key=lambda value: level_rank[value])
         result = {
             "food_level": food_level,
             "water_level": water_level,
             "food_empty": food_level == "empty",
             "water_empty": water_level == "empty",
         }
-        brain_log("vision.care.ok", result=result)
+        brain_log("vision.care.ok", result=result, images=len(images))
         return result
     except Exception as exc:
         brain_log("vision.care.exception", level="error", error=str(exc))
@@ -2151,73 +2454,93 @@ async def evaluate_eating_drinking(snapshots: list[dict[str, str]]) -> dict[str,
         brain_log("vision.behavior.skip.no_images", level="warning")
         return defaults
 
-    payload = {
-        "model": OOGWAY_OLLAMA_VISION_MODEL,
-        "stream": False,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You classify tortoise behavior from terrarium images. "
-                    "Be conservative and avoid false positives."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Return ONLY strict JSON with keys: "
-                    '{"scene_lit": boolean, "tortoise_visible": boolean, "near_food": boolean, "near_water": boolean, "eating": boolean, "drinking": boolean}. '
-                    "Rules: if scene is dark/low-light or unclear, scene_lit=false and all other fields false. "
-                    "Set near_food=true only if tortoise is physically at the food dish. "
-                    "Set near_water=true only if tortoise is physically at the water dish. "
-                    "Set eating=true only when tortoise is clearly biting/chewing food and near_food=true. "
-                    "Set drinking=true only when tortoise is clearly sipping from water and near_water=true. "
-                    "If uncertain, return false."
-                ),
-                "images": images,
-            },
-        ],
-        "options": {"temperature": 0.0, "num_predict": 90},
-    }
-
     try:
+        results: list[dict[str, bool]] = []
         async with httpx.AsyncClient(timeout=float(OOGWAY_BRAIN_VISION_TIMEOUT_SECONDS)) as client:
-            resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
-        if resp.status_code >= 400:
-            body_excerpt = ""
-            with suppress(Exception):
-                body_excerpt = resp.text[:280]
-            brain_log("vision.behavior.http_error", level="error", status=resp.status_code, body=body_excerpt)
+            for image in images:
+                payload = {
+                    "model": OOGWAY_OLLAMA_VISION_MODEL,
+                    "stream": False,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You classify tortoise behavior from terrarium images. "
+                                "Be conservative and avoid false positives."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "Return ONLY strict JSON with keys: "
+                                '{"scene_lit": boolean, "tortoise_visible": boolean, "near_food": boolean, "near_water": boolean, "eating": boolean, "drinking": boolean}. '
+                                "Rules: if scene is dark/low-light or unclear, scene_lit=false and all other fields false. "
+                                "Set near_food=true only if tortoise is physically at the food dish. "
+                                "Set near_water=true only if tortoise is physically at the water dish. "
+                                "Set eating=true only when tortoise is clearly biting/chewing food and near_food=true. "
+                                "Set drinking=true only when tortoise is clearly sipping from water and near_water=true. "
+                                "If uncertain, return false."
+                            ),
+                            "images": [image],
+                        },
+                    ],
+                    "options": {"temperature": 0.0, "num_predict": 90},
+                }
+                resp = await client.post(f"{OOGWAY_OLLAMA_BASE.rstrip('/')}/api/chat", json=payload)
+                if resp.status_code >= 400:
+                    body_excerpt = ""
+                    with suppress(Exception):
+                        body_excerpt = resp.text[:280]
+                    brain_log("vision.behavior.http_error", level="error", status=resp.status_code, body=body_excerpt)
+                    continue
+
+                content = resp.json().get("message", {}).get("content", "")
+                parsed = _parse_json_from_text(str(content))
+                if not parsed:
+                    brain_log("vision.behavior.parse_error", level="warning", content=str(content)[:280])
+                    continue
+
+                result = {
+                    "scene_lit": bool(parsed.get("scene_lit", False)),
+                    "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
+                    "near_food": bool(parsed.get("near_food", False)),
+                    "near_water": bool(parsed.get("near_water", False)),
+                    "eating": bool(parsed.get("eating", False)),
+                    "drinking": bool(parsed.get("drinking", False)),
+                }
+
+                if not result["scene_lit"] or not result["tortoise_visible"]:
+                    result["near_food"] = False
+                    result["near_water"] = False
+                    result["eating"] = False
+                    result["drinking"] = False
+                if not result["near_food"]:
+                    result["eating"] = False
+                if not result["near_water"]:
+                    result["drinking"] = False
+
+                results.append(result)
+
+        if not results:
             return defaults
 
-        content = resp.json().get("message", {}).get("content", "")
-        parsed = _parse_json_from_text(str(content))
-        if not parsed:
-            brain_log("vision.behavior.parse_error", level="warning", content=str(content)[:280])
-            return defaults
-
-        result = {
-            "scene_lit": bool(parsed.get("scene_lit", False)),
-            "tortoise_visible": bool(parsed.get("tortoise_visible", False)),
-            "near_food": bool(parsed.get("near_food", False)),
-            "near_water": bool(parsed.get("near_water", False)),
-            "eating": bool(parsed.get("eating", False)),
-            "drinking": bool(parsed.get("drinking", False)),
+        merged = {
+            "scene_lit": any(row["scene_lit"] for row in results),
+            "tortoise_visible": any(row["tortoise_visible"] for row in results),
+            "near_food": any(row["near_food"] for row in results),
+            "near_water": any(row["near_water"] for row in results),
+            "eating": any(row["eating"] for row in results),
+            "drinking": any(row["drinking"] for row in results),
         }
+        if not merged["scene_lit"] or not merged["tortoise_visible"]:
+            return defaults
+        if not merged["near_food"]:
+            merged["eating"] = False
+        if not merged["near_water"]:
+            merged["drinking"] = False
 
-        # Hard guardrails to suppress hallucinated behavior calls.
-        if not result["scene_lit"] or not result["tortoise_visible"]:
-            result["near_food"] = False
-            result["near_water"] = False
-            result["eating"] = False
-            result["drinking"] = False
-        if not result["near_food"]:
-            result["eating"] = False
-        if not result["near_water"]:
-            result["drinking"] = False
-
-        brain_log("vision.behavior.ok", result=result)
-        return result
+        brain_log("vision.behavior.ok", result=merged, images=len(results))
+        return merged
     except Exception as exc:
         brain_log("vision.behavior.exception", level="error", error=str(exc))
         return defaults
@@ -2379,6 +2702,10 @@ async def run_brain_eating_check() -> None:
 
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
         brain_log("brain.eating.skip.not_configured", level="debug")
+        return
+
+    if not auto_chat_enabled():
+        brain_log("brain.eating.skip.auto_chat_disabled", level="debug")
         return
 
     if not brain_awake_now():
@@ -2677,6 +3004,9 @@ def should_trigger_oogway_mention(text: str) -> bool:
         trigger = "@oogway"
     return trigger in text.lower()
 
+def auto_chat_enabled() -> bool:
+    return OOGWAY_BRAIN_AUTO_CHAT_ENABLED
+
 
 async def enqueue_brain_response(trigger: str, source_message: dict[str, Any] | None = None) -> bool:
     global BRAIN_QUEUE_SEQUENCE
@@ -2741,10 +3071,20 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
                 brain_log("brain.reply.skip.interval", trigger=trigger, elapsed=elapsed, needed=OOGWAY_BRAIN_INTERVAL_SECONDS, level="debug")
                 return
 
-        movement_recent = await refresh_brain_motion_state()
-
-        prompt_text = build_oogway_prompt(trigger, source_message, sleepy_mode=sleepy_mode)
         snapshots = await capture_brain_snapshots_data_urls()
+        visual_validation = await validate_visual_observation(
+            snapshots,
+            reason=f"prompt-{trigger}",
+            record_memory=trigger in {"mention", "manual", "chat"},
+            record_activity=False,
+        )
+        await refresh_brain_motion_state()
+        prompt_text = build_oogway_prompt(
+            trigger,
+            source_message,
+            sleepy_mode=sleepy_mode,
+            visual_validation=visual_validation,
+        )
         brain_log("brain.reply.request", trigger=trigger, snapshots=len(snapshots), promptChars=len(prompt_text))
         await broadcast_oogway_typing(True)
         try:
@@ -2774,9 +3114,6 @@ async def run_oogway_brain(trigger: str, source_message: dict[str, Any] | None =
 async def run_brain_behavior_check() -> None:
     """Periodic vision check for hut entry/exit, fallen over, fed, watered — logs everything to Obsidian."""
     global LAST_BEHAVIOR_CHECK_AT, LAST_HUT_STATE, LAST_FALLEN_ALERT_AT
-    global LAST_ACTIVITY_LOG_AT, LAST_OBSERVED_SUMMARY, LAST_OBSERVED_TOPIC
-    global LAST_OBSERVED_LOCATION, LAST_OBSERVED_ACTIVITY
-
     if not OOGWAY_BRAIN_ENABLED or not is_brain_configured():
         return
 
@@ -2794,8 +3131,14 @@ async def run_brain_behavior_check() -> None:
     if not snapshots:
         return
 
-    state = await evaluate_behavior_state(snapshots)
-    behavior = await evaluate_eating_drinking(snapshots)
+    visual_validation = await validate_visual_observation(
+        snapshots,
+        reason="vision-validation",
+        record_memory=True,
+        record_activity=True,
+    )
+    state = dict(visual_validation.get("state") or {})
+    behavior = dict(visual_validation.get("behavior") or {})
 
     # Merge independent location cues from behavior and state classifiers.
     effective_near_water = bool(behavior.get("near_water") or state.get("near_water"))
@@ -2817,33 +3160,18 @@ async def run_brain_behavior_check() -> None:
 
     now_dt = now_utc()
     now_iso = now_dt.isoformat()
-    summary, summary_topic, location_label, links = summarize_observed_state(state_for_summary, behavior_for_summary)
-    activity_label = summary.removeprefix(f"Oogway is {location_label} and ").rstrip(".") if summary.startswith(f"Oogway is {location_label} and ") else summary
-    observation_due = (
-        LAST_ACTIVITY_LOG_AT is None
-        or (now_dt - LAST_ACTIVITY_LOG_AT).total_seconds() >= OOGWAY_BRAIN_ACTIVITY_LOG_INTERVAL_SECONDS
-        or summary != LAST_OBSERVED_SUMMARY
+    location_label = str(visual_validation.get("location") or "unknown")
+    activity_label = str(visual_validation.get("activity") or "unknown")
+    remember_memory_event(
+        topic="visual-location",
+        note=(
+            f"Validated location/activity: location={location_label}; activity={activity_label}; "
+            f"near_hut={state.get('near_hut', False)}; near_water={effective_near_water}; "
+            f"near_food={effective_near_food}; in_hut={effective_in_hut}; visible={state.get('tortoise_visible', False)}."
+        ),
+        trigger="vision-location",
+        ts=now_iso,
     )
-    LAST_OBSERVED_SUMMARY = summary
-    LAST_OBSERVED_TOPIC = summary_topic
-    LAST_OBSERVED_LOCATION = location_label
-    LAST_OBSERVED_ACTIVITY = activity_label
-    if observation_due:
-        append_to_daily_activity_log(now_iso, summary_topic, summary, links=links)
-        remember_memory_event(topic=summary_topic, note=summary, trigger="vision-observation", ts=now_iso)
-        remember_memory_event(
-            topic="visual-location",
-            note=(
-                f"Visual location scan: location={location_label}; "
-                f"near_hut={state.get('near_hut', False)}; "
-                f"near_water={effective_near_water}; "
-                f"near_food={effective_near_food}; "
-                f"in_hut={effective_in_hut}."
-            ),
-            trigger="vision-location",
-            ts=now_iso,
-        )
-        LAST_ACTIVITY_LOG_AT = now_dt
 
     # --- Hut entry / exit transition ---
     in_hut_now = effective_in_hut
@@ -2895,7 +3223,8 @@ async def oogway_brain_loop() -> None:
             await run_brain_care_check()
             await run_brain_eating_check()
             await run_brain_behavior_check()
-            await enqueue_brain_response(trigger="periodic")
+            if auto_chat_enabled():
+                await enqueue_brain_response(trigger="periodic")
         except Exception:
             # Keep loop alive even if upstream LLM/camera calls fail.
             pass
@@ -2905,22 +3234,6 @@ async def oogway_brain_loop() -> None:
             OOGWAY_BRAIN_EATING_CHECK_INTERVAL_SECONDS,
             OOGWAY_BRAIN_BEHAVIOR_CHECK_INTERVAL_SECONDS,
         ))
-
-
-def get_local_tz() -> ZoneInfo:
-    try:
-        return ZoneInfo(TZ)
-    except Exception:
-        return ZoneInfo("UTC")
-
-
-def parse_iso_ts(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
 
 
 def now_utc() -> datetime:
@@ -2938,21 +3251,29 @@ def local_obsidian_iso(ts: Any | None = None) -> str:
         dt = parsed
     else:
         dt = now_utc()
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(local_tz).isoformat()
+    return dt.astimezone(local_tz).isoformat(timespec="seconds")
 
 
 def local_obsidian_timestamp(ts: Any | None = None) -> str:
-    local_dt = parse_iso_ts(local_obsidian_iso(ts))
-    if local_dt is None:
-        return str(ts or "")[:19]
-    return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    return local_obsidian_iso(ts).replace("T", " ")
+
+
+def parse_iso_ts(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    with suppress(ValueError):
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
 
 
 def cleanup_admin_tokens() -> None:
     now = now_utc()
-    expired = [token for token, exp in ADMIN_TOKENS.items() if exp <= now]
+    expired = [token for token, expires_at in ADMIN_TOKENS.items() if expires_at <= now]
     for token in expired:
         ADMIN_TOKENS.pop(token, None)
 
@@ -2961,7 +3282,7 @@ def require_admin(request: Request) -> None:
     cleanup_admin_tokens()
     token = request.headers.get("X-Admin-Token", "").strip()
     if not token or token not in ADMIN_TOKENS:
-        raise HTTPException(status_code=401, detail="Admin authorization required")
+        raise HTTPException(status_code=401, detail="Admin login required")
 
 
 def issue_admin_token() -> str:
@@ -3212,6 +3533,7 @@ def brain_status() -> dict[str, Any]:
         "cameraKey": OOGWAY_BRAIN_CAMERA_KEY,
         "cameraTargets": [{"key": t["key"], "label": t["label"]} for t in targets],
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
+        "autoChatEnabled": OOGWAY_BRAIN_AUTO_CHAT_ENABLED,
         "careCheckIntervalSeconds": OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS,
         "careConfirmations": OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS,
         "careAlertCooldownSeconds": OOGWAY_BRAIN_CARE_ALERT_COOLDOWN_SECONDS,
@@ -3338,6 +3660,7 @@ class BrainConfigUpdate(BaseModel):
     personality: str | None = None
     intervalSeconds: int | None = None
     mentionTrigger: str | None = None
+    autoChatEnabled: bool | None = None
 
 
 @app.get("/api/admin/brain-config")
@@ -3351,6 +3674,7 @@ def get_brain_config(request: Request) -> dict[str, Any]:
         "personality": OOGWAY_BRAIN_PERSONALITY,
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
         "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+        "autoChatEnabled": OOGWAY_BRAIN_AUTO_CHAT_ENABLED,
     }
 
 
@@ -3358,7 +3682,7 @@ def get_brain_config(request: Request) -> dict[str, Any]:
 def update_brain_config(payload: BrainConfigUpdate, request: Request) -> dict[str, Any]:
     global OOGWAY_BRAIN_ENABLED, OOGWAY_OLLAMA_MODEL, OOGWAY_OLLAMA_VISION_MODEL
     global OOGWAY_OLLAMA_BASE, OOGWAY_BRAIN_PERSONALITY
-    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER
+    global OOGWAY_BRAIN_INTERVAL_SECONDS, OOGWAY_BRAIN_MENTION_TRIGGER, OOGWAY_BRAIN_AUTO_CHAT_ENABLED
     require_admin(request)
 
     if payload.enabled is not None:
@@ -3375,11 +3699,14 @@ def update_brain_config(payload: BrainConfigUpdate, request: Request) -> dict[st
         OOGWAY_BRAIN_INTERVAL_SECONDS = max(45, int(payload.intervalSeconds))
     if payload.mentionTrigger is not None and payload.mentionTrigger.strip():
         OOGWAY_BRAIN_MENTION_TRIGGER = payload.mentionTrigger.strip()
+    if payload.autoChatEnabled is not None:
+        OOGWAY_BRAIN_AUTO_CHAT_ENABLED = bool(payload.autoChatEnabled)
 
     _save_brain_config()
     brain_log("brain.config.updated", enabled=OOGWAY_BRAIN_ENABLED, chatModel=OOGWAY_OLLAMA_MODEL,
               visionModel=OOGWAY_OLLAMA_VISION_MODEL, ollamaBase=OOGWAY_OLLAMA_BASE,
-              intervalSeconds=OOGWAY_BRAIN_INTERVAL_SECONDS, mentionTrigger=OOGWAY_BRAIN_MENTION_TRIGGER)
+              intervalSeconds=OOGWAY_BRAIN_INTERVAL_SECONDS, mentionTrigger=OOGWAY_BRAIN_MENTION_TRIGGER,
+              autoChatEnabled=OOGWAY_BRAIN_AUTO_CHAT_ENABLED)
     return {
         "ok": True,
         "enabled": OOGWAY_BRAIN_ENABLED,
@@ -3389,7 +3716,127 @@ def update_brain_config(payload: BrainConfigUpdate, request: Request) -> dict[st
         "personality": OOGWAY_BRAIN_PERSONALITY,
         "intervalSeconds": OOGWAY_BRAIN_INTERVAL_SECONDS,
         "mentionTrigger": OOGWAY_BRAIN_MENTION_TRIGGER,
+        "autoChatEnabled": OOGWAY_BRAIN_AUTO_CHAT_ENABLED,
     }
+
+
+# ---------------------------------------------------------------------------
+# Visual State API – admin read / override / refresh
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/visual-state")
+def get_visual_state(request: Request) -> dict[str, Any]:
+    """Return the AI's current per-camera visual state and summary globals."""
+    require_admin(request)
+    return {
+        "validatedAt": LAST_VISUAL_VALIDATED_AT.isoformat() if LAST_VISUAL_VALIDATED_AT else None,
+        "summary": LAST_OBSERVED_SUMMARY,
+        "location": LAST_OBSERVED_LOCATION,
+        "activity": LAST_OBSERVED_ACTIVITY,
+        "cameraStates": [
+            {"key": k, **v} for k, v in LAST_CAMERA_VISUAL_STATES.items()
+        ],
+        "cameraLines": list(LAST_VISUAL_VALIDATION_LINES),
+    }
+
+
+class VisualStateCameraOverride(BaseModel):
+    key: str
+    scene_lit: bool | None = None
+    tortoise_visible: bool | None = None
+    in_hut: bool | None = None
+    near_hut: bool | None = None
+    near_water: bool | None = None
+    near_food: bool | None = None
+    fallen_over: bool | None = None
+    eating: bool | None = None
+    drinking: bool | None = None
+    basking: bool | None = None
+    sleeping: bool | None = None
+    location: str | None = None
+    activity: str | None = None
+
+
+class VisualStateUpdate(BaseModel):
+    summary: str | None = None
+    location: str | None = None
+    activity: str | None = None
+    cameras: list[VisualStateCameraOverride] | None = None
+
+
+@app.post("/api/admin/visual-state")
+def override_visual_state(payload: VisualStateUpdate, request: Request) -> dict[str, Any]:
+    """Admin override for per-camera visual state and observation globals."""
+    global LAST_OBSERVED_SUMMARY, LAST_OBSERVED_LOCATION, LAST_OBSERVED_ACTIVITY
+    global LAST_CAMERA_VISUAL_STATES, LAST_VISUAL_VALIDATION_LINES
+    require_admin(request)
+
+    if payload.summary is not None:
+        LAST_OBSERVED_SUMMARY = payload.summary.strip()
+    if payload.location is not None:
+        LAST_OBSERVED_LOCATION = payload.location.strip()
+    if payload.activity is not None:
+        LAST_OBSERVED_ACTIVITY = payload.activity.strip()
+
+    if payload.cameras:
+        for cam in payload.cameras:
+            existing = dict(LAST_CAMERA_VISUAL_STATES.get(cam.key, {}))
+            for field in [
+                "scene_lit", "tortoise_visible", "in_hut", "near_hut",
+                "near_water", "near_food", "fallen_over", "eating",
+                "drinking", "basking", "sleeping",
+            ]:
+                val = getattr(cam, field)
+                if val is not None:
+                    existing[field] = val
+            if cam.location is not None:
+                existing["location"] = cam.location.strip()
+            if cam.activity is not None:
+                existing["activity"] = cam.activity.strip()
+            LAST_CAMERA_VISUAL_STATES[cam.key] = existing
+
+    # Rebuild camera lines from updated states
+    LAST_VISUAL_VALIDATION_LINES = [
+        describe_camera_visual_state({"key": k, "label": k, **v})
+        for k, v in LAST_CAMERA_VISUAL_STATES.items()
+    ]
+
+    brain_log("visual.state.overridden", summary=LAST_OBSERVED_SUMMARY, location=LAST_OBSERVED_LOCATION,
+              activity=LAST_OBSERVED_ACTIVITY, cameras=len(LAST_CAMERA_VISUAL_STATES))
+    return {
+        "ok": True,
+        "validatedAt": LAST_VISUAL_VALIDATED_AT.isoformat() if LAST_VISUAL_VALIDATED_AT else None,
+        "summary": LAST_OBSERVED_SUMMARY,
+        "location": LAST_OBSERVED_LOCATION,
+        "activity": LAST_OBSERVED_ACTIVITY,
+        "cameraStates": [
+            {"key": k, **v} for k, v in LAST_CAMERA_VISUAL_STATES.items()
+        ],
+        "cameraLines": list(LAST_VISUAL_VALIDATION_LINES),
+    }
+
+
+@app.post("/api/admin/visual-state/refresh")
+async def refresh_visual_state(request: Request) -> dict[str, Any]:
+    """Trigger a fresh vision capture + validation pass and return results."""
+    require_admin(request)
+    if not OOGWAY_BRAIN_ENABLED or not OOGWAY_OLLAMA_VISION_MODEL:
+        return {"ok": False, "error": "Brain/vision not enabled or vision model not configured"}
+    try:
+        snapshots = await capture_brain_snapshots_data_urls()
+        result = await validate_visual_observation(snapshots, reason="admin-refresh", record_memory=True, record_activity=False)
+        return {
+            "ok": True,
+            "validatedAt": LAST_VISUAL_VALIDATED_AT.isoformat() if LAST_VISUAL_VALIDATED_AT else None,
+            "summary": result["summary"],
+            "location": result["location"],
+            "activity": result["activity"],
+            "cameraStates": result["cameraStates"],
+            "cameraLines": result["cameraLines"],
+        }
+    except Exception as exc:
+        brain_log("visual.refresh.error", error=str(exc))
+        return {"ok": False, "error": str(exc)}
 
 
 @app.websocket("/ws/chat")
@@ -3464,7 +3911,7 @@ async def chat_ws(
                         text=text[:180],
                     )
                     await enqueue_brain_response(trigger="mention", source_message=msg)
-                else:
+                elif auto_chat_enabled():
                     await enqueue_brain_response(trigger="chat", source_message=msg)
     except WebSocketDisconnect:
         CHAT_CLIENTS.discard(ws)

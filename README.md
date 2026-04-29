@@ -1,4 +1,4 @@
-# OogWorld Dashboard v0.3.0
+# OogWorld Dashboard v0.3.1
 
 A real-time terrarium monitoring and control dashboard for Oogway's enclosure, featuring live HLS stream playback, selectable dual-camera views, and action notifications via ntfy.
 
@@ -78,8 +78,9 @@ If Intel Quick Sync is unstable on that laptop, switch `-c:v h264_qsv` to `-c:v 
   - `OOGWAY_OBSIDIAN_MEMORY_FOLDER` → folder inside vault for Oogway notes
   - `HOST_OBSIDIAN_VAULT_PATH` → host folder mounted into OogWorld and Syncthing (default `./obsidian-vault`)
   - `SYNCTHING_PUID` / `SYNCTHING_PGID` → Linux user/group IDs for file ownership (default `1000`)
-  - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake (default `300`)
+  - `OOGWAY_BRAIN_INTERVAL_SECONDS` → periodic chat interval while awake when automatic chat is enabled
   - `OOGWAY_BRAIN_MENTION_TRIGGER` → mention token (default `@oogway`)
+  - `OOGWAY_BRAIN_AUTO_CHAT_ENABLED` → `false` by default; when `true`, Oogway can post unsolicited periodic and reaction chat
   - `OOGWAY_BRAIN_CAMERA_KEY` → `both` (recommended), `primary`, or `secondary` for vision snapshots
   - `OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS` → how often Oogway checks bowls (default `180`)
   - `OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS` → consecutive empty checks required before alert (default `3`)
@@ -124,6 +125,7 @@ OOGWAY_OLLAMA_MODEL=qwen2.5:3b
 OOGWAY_OLLAMA_VISION_MODEL=moondream:latest
 OOGWAY_BRAIN_INTERVAL_SECONDS=300
 OOGWAY_BRAIN_MENTION_TRIGGER=@oogway
+OOGWAY_BRAIN_AUTO_CHAT_ENABLED=false
 OOGWAY_BRAIN_CAMERA_KEY=both
 OOGWAY_BRAIN_CARE_CHECK_INTERVAL_SECONDS=180
 OOGWAY_BRAIN_CARE_EMPTY_CONFIRMATIONS=3
@@ -212,7 +214,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 4120
 - **Heatlamp Daylight Automation**: Sunrise/sunset schedule fetched from `https://sunrise-sunset.org/api` several times per day
 - **Bedtime Banners**: Countdown appears before sunset; overnight banner shows `oogway is asleep, his heatlamp will turn on in XX:XX`
 - **Night Mode**: When Oogway is asleep, the app shifts into moon-and-stars night theme
-- **Oogway Brain**: Optional AI chat companion that can see a camera snapshot, respond to `@oogway`, post periodic updates while awake, and persist memory over time
+- **Oogway Brain**: Optional AI chat companion that can see camera snapshots, respond to `@oogway`, queue single-image vision checks safely for CPU-friendly models, and persist memory over time
 - **Responsive Design**: Desktop layout (video left, controls right) and mobile stack (video top, buttons bottom)
 - **GhostWorld Aesthetic**: Nature-inspired dark palette with forest greens and warm neutral text
 - **Live Status Pulse**: Animated breathing dot indicates stream is live
@@ -254,10 +256,11 @@ The application is designed with extension points for:
 - **Stream not loading**: Verify `STREAM_URL_PRIMARY` and `STREAM_URL_SECONDARY` are reachable from the container. If MediaMTX is on a different machine, use its reachable IP or hostname instead of `mediamtx`.
 - **Notifications not sending**: Check that `NTFY_TOPIC` is correctly set and ntfy.sh is reachable from the container.
 - **Activity log not persisting**: Ensure the container has write permissions to the volume or path specified by `ACTIVITY_LOG_PATH`.
+- **Vision model says it only accepts one image**: Keep `OOGWAY_OLLAMA_VISION_MODEL=moondream:latest` and let OogWorld queue camera snapshots one at a time. If CPU latency is still too high, use a smaller Ollama model rather than a larger vision model.
 
 ## Version
 
-- Current: 0.3.0
+- Current: 0.3.1
 - Bump method: semver (major.minor.patch, each segment 0–99)
 
 ## Changelog

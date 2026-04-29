@@ -882,6 +882,13 @@
             </label>
           </div>
           <div style="display:grid;gap:8px;">
+            <label style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid rgba(126,184,126,0.16);border-radius:10px;background:rgba(0,0,0,0.18);">
+              <span>
+                <span style="display:block;font-size:11px;color:#d1d5db;">Automatic Chat</span>
+                <span style="display:block;font-size:10px;color:#6b7280;">Allows unsolicited Oogway replies and periodic chatter.</span>
+              </span>
+              <input id="ai-auto-chat-toggle" type="checkbox" style="accent-color:#4caf50;width:15px;height:15px;" />
+            </label>
             <div>
               <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Chat Model</label>
               <input id="ai-chat-model" type="text" placeholder="llama3.1:8b"
@@ -920,6 +927,48 @@
                 style="background:rgba(76,175,80,0.18);border:1px solid rgba(76,175,80,0.4);color:#81c784;">Save AI Settings</button>
               <span id="ai-save-status" style="font-size:11px;color:#6b7280;"></span>
             </div>
+          </div>
+        </div>
+
+        <!-- Visual State Panel -->
+        <div id="visual-state-panel" style="border:1px solid rgba(126,184,126,0.25);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:rgba(28,42,31,0.45);">
+          <div class="mb-3 flex items-center justify-between">
+            <span style="font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8cb88c;">AI Vision State</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span id="visual-validated-at" style="font-size:10px;color:#6b7280;">Never validated</span>
+              <button id="visual-refresh-btn" title="Run fresh vision capture" style="font-size:11px;padding:3px 10px;border-radius:6px;background:rgba(76,175,80,0.15);border:1px solid rgba(76,175,80,0.35);color:#81c784;cursor:pointer;">↻ Refresh</button>
+            </div>
+          </div>
+
+          <!-- Summary / Location / Activity overrides -->
+          <div style="display:grid;gap:8px;margin-bottom:10px;">
+            <div>
+              <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Summary (what AI says Oogway is doing)</label>
+              <textarea id="vs-summary" rows="2" placeholder="Oogway is not clearly visible right now."
+                style="margin-top:4px;width:100%;border-radius:8px;border:1px solid rgba(126,184,126,0.2);background:rgba(0,0,0,0.25);padding:6px 10px;font-size:12px;color:#d1d5db;outline:none;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div>
+                <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Location</label>
+                <input id="vs-location" type="text" placeholder="unknown"
+                  style="margin-top:4px;width:100%;border-radius:8px;border:1px solid rgba(126,184,126,0.2);background:rgba(0,0,0,0.25);padding:6px 10px;font-size:12px;color:#d1d5db;outline:none;box-sizing:border-box;" />
+              </div>
+              <div>
+                <label style="font-size:10px;color:#6b7280;letter-spacing:.06em;text-transform:uppercase;">Activity</label>
+                <input id="vs-activity" type="text" placeholder="unknown"
+                  style="margin-top:4px;width:100%;border-radius:8px;border:1px solid rgba(126,184,126,0.2);background:rgba(0,0,0,0.25);padding:6px 10px;font-size:12px;color:#d1d5db;outline:none;box-sizing:border-box;" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Per-camera boolean grid -->
+          <div id="vs-cameras-container" style="display:grid;gap:8px;margin-bottom:10px;">
+            <!-- populated by JS -->
+          </div>
+
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="visual-save-btn" style="font-size:12px;padding:5px 14px;border-radius:7px;background:rgba(76,175,80,0.18);border:1px solid rgba(76,175,80,0.4);color:#81c784;cursor:pointer;">Save Corrections</button>
+            <span id="visual-save-status" style="font-size:11px;color:#6b7280;"></span>
           </div>
         </div>
 
@@ -1032,6 +1081,7 @@
         adminClearChat: document.getElementById("admin-clear-chat"),
         adminLogoutBtn: document.getElementById("admin-logout-btn"),
         aiEnabledToggle: document.getElementById("ai-enabled-toggle"),
+        aiAutoChatToggle: document.getElementById("ai-auto-chat-toggle"),
         aiChatModel: document.getElementById("ai-chat-model"),
         aiVisionModel: document.getElementById("ai-vision-model"),
         aiOllamaBase: document.getElementById("ai-ollama-base"),
@@ -1040,6 +1090,15 @@
         aiPersonality: document.getElementById("ai-personality"),
         aiSaveBtn: document.getElementById("ai-save-btn"),
         aiSaveStatus: document.getElementById("ai-save-status"),
+        visualStatePanel: document.getElementById("visual-state-panel"),
+        visualRefreshBtn: document.getElementById("visual-refresh-btn"),
+        visualSaveBtn: document.getElementById("visual-save-btn"),
+        visualSaveStatus: document.getElementById("visual-save-status"),
+        visualValidatedAt: document.getElementById("visual-validated-at"),
+        vsSummary: document.getElementById("vs-summary"),
+        vsLocation: document.getElementById("vs-location"),
+        vsActivity: document.getElementById("vs-activity"),
+        vsCamerasContainer: document.getElementById("vs-cameras-container"),
       };
 
       var reportBannerTimer = null;
@@ -1648,6 +1707,7 @@
           redrawChatWithAdminControls();
           el.adminPasswordInput.value = "";
           loadAiConfig();
+          loadVisualState();
         } catch (e) {
           alert("Admin login failed");
         }
@@ -1669,7 +1729,7 @@
       function openAdminModal() {
         renderAdminView();
         el.adminModal.classList.remove("hidden");
-        if (state.adminToken) loadAiConfig();
+        if (state.adminToken) { loadAiConfig(); loadVisualState(); }
       }
 
       function closeAdminModal() {
@@ -1683,6 +1743,7 @@
           if (!resp.ok) return;
           var cfg = await resp.json();
           el.aiEnabledToggle.checked = !!cfg.enabled;
+          el.aiAutoChatToggle.checked = !!cfg.autoChatEnabled;
           el.aiChatModel.value = cfg.chatModel || "";
           el.aiVisionModel.value = cfg.visionModel || "";
           el.aiOllamaBase.value = cfg.ollamaBase || "";
@@ -1698,6 +1759,7 @@
         try {
           var body = {
             enabled: el.aiEnabledToggle.checked,
+            autoChatEnabled: el.aiAutoChatToggle.checked,
             chatModel: el.aiChatModel.value.trim(),
             visionModel: el.aiVisionModel.value.trim(),
             ollamaBase: el.aiOllamaBase.value.trim(),
@@ -1715,6 +1777,172 @@
           setTimeout(function () { el.aiSaveStatus.textContent = ""; }, 2500);
         } catch (e) {
           el.aiSaveStatus.textContent = "Error";
+        }
+      }
+
+      // ---- Visual State Panel ----
+
+      var VS_BOOL_FIELDS = [
+        { key: "scene_lit",        label: "Scene Lit" },
+        { key: "tortoise_visible", label: "Visible" },
+        { key: "in_hut",           label: "In Hut" },
+        { key: "near_hut",         label: "Near Hut" },
+        { key: "near_food",        label: "Near Food" },
+        { key: "near_water",       label: "Near Water" },
+        { key: "eating",           label: "Eating" },
+        { key: "drinking",         label: "Drinking" },
+        { key: "basking",          label: "Basking" },
+        { key: "sleeping",         label: "Sleeping" },
+        { key: "fallen_over",      label: "Fallen Over" },
+      ];
+
+      function renderVisualStateCameras(cameraStates) {
+        el.vsCamerasContainer.innerHTML = "";
+        if (!cameraStates || !cameraStates.length) {
+          el.vsCamerasContainer.innerHTML = '<p style="font-size:11px;color:#6b7280;">No camera data yet — click Refresh to run a vision pass.</p>';
+          return;
+        }
+        cameraStates.forEach(function (cam) {
+          var camKey = cam.key || "cam";
+          var camLabel = cam.label || camKey;
+          var block = document.createElement("div");
+          block.style.cssText = "border:1px solid rgba(126,184,126,0.15);border-radius:8px;padding:8px 10px;background:rgba(0,0,0,0.18);";
+          block.dataset.camKey = camKey;
+
+          var header = document.createElement("div");
+          header.style.cssText = "font-size:11px;font-weight:600;color:#9ca3af;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em;";
+          header.textContent = camLabel;
+          block.appendChild(header);
+
+          var grid = document.createElement("div");
+          grid.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:4px 8px;";
+
+          VS_BOOL_FIELDS.forEach(function (f) {
+            var lbl = document.createElement("label");
+            lbl.style.cssText = "display:flex;align-items:center;gap:5px;font-size:11px;color:#d1d5db;cursor:pointer;white-space:nowrap;";
+            var chk = document.createElement("input");
+            chk.type = "checkbox";
+            chk.style.cssText = "accent-color:#4caf50;width:13px;height:13px;flex-shrink:0;";
+            chk.dataset.camKey = camKey;
+            chk.dataset.field = f.key;
+            chk.checked = !!cam[f.key];
+            lbl.appendChild(chk);
+            lbl.appendChild(document.createTextNode(f.label));
+            grid.appendChild(lbl);
+          });
+          block.appendChild(grid);
+
+          // Location / Activity overrides per camera
+          var locRow = document.createElement("div");
+          locRow.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;";
+          ["location", "activity"].forEach(function (fieldName) {
+            var wrap = document.createElement("div");
+            var lbl = document.createElement("label");
+            lbl.style.cssText = "font-size:9px;color:#6b7280;letter-spacing:.05em;text-transform:uppercase;";
+            lbl.textContent = fieldName;
+            var inp = document.createElement("input");
+            inp.type = "text";
+            inp.style.cssText = "margin-top:2px;width:100%;border-radius:6px;border:1px solid rgba(126,184,126,0.18);background:rgba(0,0,0,0.2);padding:4px 8px;font-size:11px;color:#d1d5db;outline:none;box-sizing:border-box;";
+            inp.dataset.camKey = camKey;
+            inp.dataset.field = fieldName;
+            inp.value = cam[fieldName] || "";
+            inp.placeholder = fieldName;
+            wrap.appendChild(lbl);
+            wrap.appendChild(inp);
+            locRow.appendChild(wrap);
+          });
+          block.appendChild(locRow);
+          el.vsCamerasContainer.appendChild(block);
+        });
+      }
+
+      function populateVisualStateUI(data) {
+        if (data.validatedAt) {
+          var d = new Date(data.validatedAt);
+          el.visualValidatedAt.textContent = "Validated " + d.toLocaleTimeString();
+        } else {
+          el.visualValidatedAt.textContent = "Never validated";
+        }
+        el.vsSummary.value = data.summary || "";
+        el.vsLocation.value = data.location || "";
+        el.vsActivity.value = data.activity || "";
+        renderVisualStateCameras(data.cameraStates || []);
+      }
+
+      async function loadVisualState() {
+        if (!state.adminToken) return;
+        try {
+          var resp = await fetch("/api/admin/visual-state", { headers: authHeaders() });
+          if (!resp.ok) return;
+          populateVisualStateUI(await resp.json());
+        } catch (e) { /* ignore */ }
+      }
+
+      async function refreshVisualState() {
+        if (!state.adminToken) return;
+        el.visualSaveStatus.textContent = "Running vision…";
+        el.visualRefreshBtn.disabled = true;
+        try {
+          var resp = await fetch("/api/admin/visual-state/refresh", {
+            method: "POST",
+            headers: authHeaders(),
+          });
+          var data = await resp.json();
+          if (!data.ok) {
+            el.visualSaveStatus.textContent = data.error || "Refresh failed";
+            return;
+          }
+          populateVisualStateUI(data);
+          el.visualSaveStatus.textContent = "Refreshed ✓";
+          setTimeout(function () { el.visualSaveStatus.textContent = ""; }, 3000);
+        } catch (e) {
+          el.visualSaveStatus.textContent = "Error";
+        } finally {
+          el.visualRefreshBtn.disabled = false;
+        }
+      }
+
+      async function saveVisualState() {
+        if (!state.adminToken) return;
+        el.visualSaveStatus.textContent = "Saving…";
+
+        // Collect camera overrides from DOM
+        var cameras = [];
+        var camBlocks = el.vsCamerasContainer.querySelectorAll("[data-cam-key]");
+        var seenKeys = {};
+        camBlocks.forEach(function (node) {
+          var key = node.dataset.camKey;
+          if (!key || seenKeys[key]) return;
+          seenKeys[key] = true;
+          var cam = { key: key };
+          // checkboxes
+          var chks = el.vsCamerasContainer.querySelectorAll("input[type=checkbox][data-cam-key='" + key + "']");
+          chks.forEach(function (c) { cam[c.dataset.field] = c.checked; });
+          // text inputs
+          var inputs = el.vsCamerasContainer.querySelectorAll("input[type=text][data-cam-key='" + key + "']");
+          inputs.forEach(function (i) { cam[i.dataset.field] = i.value.trim(); });
+          cameras.push(cam);
+        });
+
+        try {
+          var body = {
+            summary: el.vsSummary.value.trim(),
+            location: el.vsLocation.value.trim(),
+            activity: el.vsActivity.value.trim(),
+            cameras: cameras,
+          };
+          var resp = await fetch("/api/admin/visual-state", {
+            method: "POST",
+            headers: Object.assign({ "Content-Type": "application/json" }, authHeaders()),
+            body: JSON.stringify(body),
+          });
+          var data = await resp.json();
+          if (!data.ok) { el.visualSaveStatus.textContent = "Save failed"; return; }
+          populateVisualStateUI(data);
+          el.visualSaveStatus.textContent = "Saved ✓";
+          setTimeout(function () { el.visualSaveStatus.textContent = ""; }, 2500);
+        } catch (e) {
+          el.visualSaveStatus.textContent = "Error";
         }
       }
 
@@ -1962,6 +2190,8 @@
       el.adminClearChat.addEventListener("click", adminClearChat);
       el.adminLogoutBtn.addEventListener("click", adminLogout);
       el.aiSaveBtn.addEventListener("click", saveAiConfig);
+      el.visualRefreshBtn.addEventListener("click", refreshVisualState);
+      el.visualSaveBtn.addEventListener("click", saveVisualState);
 
       el.chatMessages.addEventListener("click", function (e) {
         var target = e.target;

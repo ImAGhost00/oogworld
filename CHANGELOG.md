@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2] - 2026-04-29
+- Added **AI Vision State** panel to the admin modal: shows per-camera boolean observations (visible, basking, sleeping, eating, drinking, in hut, near food/water, fallen over, scene lit), last validation timestamp, and editable summary/location/activity fields.
+- Added `GET /api/admin/visual-state`, `POST /api/admin/visual-state` (override), and `POST /api/admin/visual-state/refresh` (fresh snapshot + validation) backend endpoints.
+- Admin can now correct wrong AI observations live without waiting for the next vision cycle.
+
+## [0.3.1] - 2026-04-29
+- Disabled Oogway automatic chat by default so he only responds when mentioned or manually triggered unless explicitly re-enabled.
+- Added admin-configurable `OOGWAY_BRAIN_AUTO_CHAT_ENABLED` runtime setting and persisted it in brain config.
+- Changed bowl and behavior vision checks to queue snapshots one image at a time so single-image Ollama models like `moondream:latest` stop failing on dual-camera payloads.
+- Aligned Compose defaults to CPU-friendlier Ollama models: `qwen2.5:3b` for chat and `moondream:latest` for vision.
+- Bumped backend/docs version to `0.3.1`.
+
 ## [0.3.0] - 2026-04-21
 - Added Oogway Brain feature in `main.py` with Groq-backed chat generation and camera-vision support.
 - Added mention-triggered responses when users include `@oogway` (configurable trigger token).
