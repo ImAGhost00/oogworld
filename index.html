@@ -181,8 +181,11 @@
       background: rgba(0, 0, 0, 0.65);
       backdrop-filter: blur(3px);
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
+      overflow-y: auto;
+      padding: 16px 0;
+      -webkit-overflow-scrolling: touch;
     }
 
     .settings-modal.hidden {
@@ -196,6 +199,39 @@
       padding: 16px;
       background: linear-gradient(165deg, #121212, #090909);
       box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+      /* let panel grow naturally; the modal overlay scrolls */
+    }
+
+    /* Admin panel is taller — give it a scrollable inner content area */
+    #admin-modal .settings-panel {
+      width: min(94vw, 540px);
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100dvh - 32px);
+    }
+
+    #admin-modal-header {
+      flex-shrink: 0;
+    }
+
+    #admin-modal-body {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      flex: 1 1 auto;
+      padding-right: 4px;
+    }
+
+    #admin-modal-body::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #admin-modal-body::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #admin-modal-body::-webkit-scrollbar-thumb {
+      background: rgba(126,184,126,0.35);
+      border-radius: 4px;
     }
 
     .name-badge {
@@ -848,11 +884,13 @@
   </div>
 
   <div id="admin-modal" class="settings-modal hidden">
-    <div class="settings-panel w-[min(94vw,540px)]">
-      <div class="mb-3 flex items-center justify-between">
+    <div class="settings-panel">
+      <div id="admin-modal-header" class="mb-3 flex items-center justify-between">
         <h2 class="text-base font-semibold">Admin Panel</h2>
         <button id="admin-close" class="cog-btn" title="Close">&#10005;</button>
       </div>
+
+      <div id="admin-modal-body">
 
       <div id="admin-login-view">
         <p class="mb-2 text-xs text-slate-400">Enter admin password to unlock moderation controls.</p>
@@ -974,6 +1012,8 @@
 
         <button id="admin-logout-btn" class="w-full rounded-lg border border-red-500/40 bg-red-950/40 py-2 text-sm font-bold text-red-100">Logout</button>
       </div>
+
+      </div><!-- /admin-modal-body -->
     </div>
   </div>
 
